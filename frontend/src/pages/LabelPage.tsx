@@ -1,33 +1,24 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type FrameDetail, type FrameFilter, type FrameItem, type Project, type Status } from "../api/client";
+import { api, type FrameDetail, type FrameFilter, type FrameItem, type Project } from "../api/client";
 import Carousel from "../components/Carousel";
 import HelpModal from "../components/HelpModal";
 import Popover from "../components/Popover";
-import ReviewPanel from "../components/ReviewPanel";
-import UserMenu from "../components/UserMenu";
-import VideoBar from "../components/VideoBar";
+import ReviewTab from "../components/ReviewTab";
+import Toolbar from "../components/Toolbar";
+import TopNav from "../components/TopNav";
+import Icon from "../components/Icon";
+import VideoTab from "../components/VideoTab";
 import { BoxEditor } from "../editor/BoxEditor";
 import { countLabels, docFromFrame, docToAnnotation, positiveClasses, type EditDoc } from "../editor/model";
 import { fmtT, VideoPlayer } from "../editor/player";
 import { Saver } from "../editor/saver";
 import { useTick } from "../editor/useTick";
 
-const nb = { onMouseDown: (e: React.MouseEvent) => e.preventDefault() };
 const LS = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } },
 };
-const ZoomIcon = ({ plus }: { plus?: boolean }) => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <circle cx="10" cy="10" r="6.5" /><path d={plus ? "M15 15l5.5 5.5M7 10h6M10 7v6" : "M15 15l5.5 5.5M7 10h6"} />
-  </svg>
-);
-
-const STATUS_TEXT: Record<Status, string> = {
-  pending: "Sin revisar", single: "Revisada por 1 persona", agreed: "Varias personas, de acuerdo", disagreement: "Desacuerdo: necesita revisor", final: "Final",
-};
-
 export default function LabelPage({ project, user, onExit, onLogout, onAdmin, onModels }: { project: Project; user: string; onExit: () => void; onLogout: () => void; onAdmin: () => void; onModels: () => void }) {
   const qc = useQueryClient();
   const classes = project.config.classes;
@@ -41,6 +32,9 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   const [curId, setCurId] = useState<number | null>(null);
   const [detail, setDetail] = useState<FrameDetail | null>(null);
   const [help, setHelp] = useState(false);
+  const [tab, setTab] = useState<"video" | "review">(() => (LS.get("sidetab") === "review" ? "review" : "video"));
+  const [viewing, setViewing] = useState<{ name: string; text: string } | null>(null);
+  const [legendOpen, setLegendOpen] = useState(() => LS.get("legend_open") === "1");
   const [gotoVal, setGotoVal] = useState("");
   const tick = useTick();
 
@@ -188,6 +182,8 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
       const dig = classes.find((c) => c.digit && c.digit === k && !c.negative);
       if (k === "b") ed.setDrawMode(!ed.drawMode);
       else if (k === "escape") ed.setDrawMode(false);
+      else if (k === "h") ed.setTool("pan");
+      else if (k === "v") { ed.setTool("select"); ed.setDrawMode(false); }
       else if (lab) ed.setLabel(lab.id);
       else if (k === "t") ed.toggleSel();
       else if (k === "u") ed.setLabel(null);
@@ -234,114 +230,79 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   const cnt = doc ? countLabels(doc) : { byLabel: {}, unlabeled: 0, manual: 0 };
   const st = stats.data;
   const reviewedN = st?.reviewed ?? 0;
-  const pos = positiveClasses(classes);
+  const canReview = project.role === "admin" || project.role === "reviewer";
+  const activeTab = canReview ? tab : "video";
+  const setTabP = (t: "video" | "review") => { setTab(t); LS.set("sidetab", t); };
+  const plural = (n: string) => (n.toLowerCase().endsWith("s") ? n : n + "s");
 
   useEffect(() => { if (document.activeElement?.id !== "goto" && cur >= 0) setGotoVal(String(cur + 1)); }, [cur]);
 
   return (
-    <div className="lp">
-      <header id="top">
-        <div className="top-left">
-          <div className="brand" title="LabelHub: etiquetado, entrenamiento y detección">LabelHub</div>
-          <div id="info" title="Video, número de fotograma e instante de la imagen que estás viendo">{item && detail && <><b>{detail.video.slice(4)}</b> · frame {detail.frame_index}{detail.t != null && <> · t={detail.t} s</>}</>}</div>
-        </div>
-        <div className="top-center" id="photoctl">
-          <button id="prev" title="Imagen anterior (A o ←). No marca la actual como revisada" aria-label="Anterior" onClick={() => goIdx(cur - 1)} {...nb}>←</button>
-          <label className="goto" title="Imagen actual y total. Escribe un número y pulsa Enter para ir directamente a esa imagen (atajo G); si te pasas va a la última">
-            <input id="goto" type="number" min={1} value={gotoVal} aria-label="Número de imagen actual" onChange={(e) => setGotoVal(e.target.value)}
-              onMouseDown={(e) => e.stopPropagation()}
-              onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { gotoNum(); (e.target as HTMLElement).blur(); } else if (e.key === "Escape") (e.target as HTMLElement).blur(); }} />
-            <span>/</span> <span id="ntotal">{frames.length}</span>
-          </label>
-          <button id="next" title="Imagen siguiente (D o →). No marca la actual como revisada" aria-label="Siguiente" onClick={() => goIdx(cur + 1)} {...nb}>→</button>
-        </div>
-        <div className="top-right">
-          <div className="topctl" id="reviewctl">
-            <button id="rev" className="primary" disabled={!canWrite} title="Marca la imagen como revisada: las cajas que no tocaste pasan a «ni piojo ni mosca» y se pasa a la siguiente (Espacio)" onClick={markRev} {...nb}>✔ Revisado y siguiente</button>
-            <button id="skip" className="ghost" title="Salta a la siguiente imagen que tú aún no has revisado (S)" onClick={skipPending} {...nb}>Sin revisar ⇥</button>
-          </div>
-          <div className="top-util">
-            <button id="modelsbtn" className="ghost" onClick={onModels} title="Modelos entrenados: ver sus indicadores y correrlos sobre un video grabado o una cámara en vivo" {...nb}>Modelos</button>
-            <button id="helpbtn" className="ghost iconbtn" aria-label="Ayuda" title="Atajos y ayuda (?)" onClick={() => setHelp(true)} {...nb}>?</button>
-            <UserMenu user={user} role={project.role} projectName={project.name} onProjects={onExit} onLogout={onLogout} />
-          </div>
-        </div>
-      </header>
+    <div className="lp2">
+      <TopNav project={project} user={user} active="label" onProjects={onExit} onLabel={() => undefined} onModels={onModels} onAdmin={onAdmin} onHelp={() => setHelp(true)} onLogout={onLogout} />
+      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} onClass={setClass} />
       <div id="main">
         <div id="stage">
           <canvas id="cv" ref={canvasRef} />
           {ed && eui && <Popover editor={ed} ui={eui} classes={classes} sources={sources} />}
         </div>
-        {pl && pui && <VideoBar player={pl} ui={pui} />}
+        <div id="info" className="ochip bl" title="Video, número de fotograma e instante de la imagen que estás viendo">
+          {item && detail ? <>Frame {detail.frame_index}{detail.t != null && <> · {fmtT(detail.t)}</>}<span className="ovid"> · {detail.video.slice(4)}</span></> : "—"}
+        </div>
+        {viewing && <div id="viewchip" className="ochip tl" title="Cajas de otra persona superpuestas sobre la imagen para compararlas"><i className="dot" style={{ background: "#16a34a" }} /> {viewing.name} · {viewing.text}</div>}
+        <div id="vmsg" className={"msg" + (pui?.msg?.ok ? " ok" : "")} hidden={!pui?.msg}>{pui?.msg?.text}</div>
       </div>
       <aside id="side">
-        <div id="vmsg" className={"msg" + (pui?.msg?.ok ? " ok" : "")} hidden={!pui?.msg}>{pui?.msg?.text}</div>
+        <div className="sidetabs" role="tablist">
+          <button id="tab-video" role="tab" aria-selected={activeTab === "video"} className={activeTab === "video" ? "on" : ""} title="Controles del video original alrededor de esta imagen" onClick={() => setTabP("video")}>Video</button>
+          {canReview && <button id="tab-review" role="tab" aria-selected={activeTab === "review"} className={activeTab === "review" ? "on" : ""} title="Comparar lo que hizo cada persona con esta imagen y elegir la versión final" onClick={() => setTabP("review")}>Revisión</button>}
+        </div>
         <div id="sidescroll">
-          <section className="blk" id="s-foto">
-            <h3 title="Estado de la imagen actual y de tu avance">Foto <span className="sx" id="pcount" title="Imágenes que tú has marcado como revisadas, sobre el total del proyecto">{reviewedN} / {st?.frames ?? frames.length} revisadas</span></h3>
-            <div className="rfoto2" id="statusrow">
-              <span className={"chip st-" + (detail?.status ?? "pending")} id="statuschip" title="Estado de esta imagen: sin revisar, revisada por una persona, de acuerdo entre varias, en desacuerdo (necesita revisor) o final">{STATUS_TEXT[detail?.status ?? "pending"]}</span>
-              {detail?.assigned_to_me && <span className="mut" title="Esta imagen está en tu cola">en tu cola</span>}
-            </div>
-            {lockHolder && <div className="lockwarn" id="lockwarn" title="Otra persona tiene abierta esta misma imagen; puedes seguir, pero conviene coordinarse">{lockHolder} también tiene esta imagen abierta</div>}
-            <div className="prog" title="Avance: imágenes que has revisado"><div className="bar"><div id="bar" style={{ width: `${st?.frames ? (100 * reviewedN) / st.frames : 0}%` }} /></div></div>
-            <div id="restoreRow" hidden={!eui?.deletedCount}>
-              <span id="rtext">{eui?.deletedCount} cuadro{eui && eui.deletedCount > 1 ? "s" : ""} borrado{eui && eui.deletedCount > 1 ? "s" : ""} en esta imagen</span>
-              <div className="r2">
-                <button id="rrlast" title="Restaurar el último cuadro borrado (Z)" onClick={() => ed?.restore(false)} {...nb}>Restaurar último <kbd>Z</kbd></button>
-                <button id="rrall" title="Restaurar todos los cuadros borrados de esta imagen" onClick={() => ed?.restore(true)} {...nb}>Restaurar todos</button>
-              </div>
-            </div>
-          </section>
-          <section className="blk" id="s-vista">
-            <h3 title="Zoom y herramientas de dibujo">Vista <span className={"sx chip" + (eui?.drawMode ? " draw" : "")} id="mode" title="Modo actual del ratón: mover la imagen o dibujar una caja nueva">{eui?.drawMode ? "Dibujando · Esc" : "Mover"}</span></h3>
-            <div className="zrow">
-              <button id="zout" title="Alejar la imagen (tecla −)" aria-label="Alejar" onClick={() => ed?.zoomBy(1 / 1.25)} {...nb}><ZoomIcon /></button>
-              <button id="zoom" title="Ajustar a la ventana (F)" onClick={() => ed?.fit()} {...nb}>{eui?.zoomPct ?? 100} %</button>
-              <button id="zin" title="Acercar la imagen (tecla +); con una caja seleccionada el zoom se centra en ella" aria-label="Acercar" onClick={() => ed?.zoomBy(1.25)} {...nb}><ZoomIcon plus /></button>
-              <button id="zfit" className="ghost" title="Ajustar la imagen a la ventana (F)" onClick={() => ed?.fit()} {...nb}>Ajustar</button>
-            </div>
-            <div className="cls r3">
-              {pos.map((c) => (
-                <button key={c.id} id={"cls_" + c.id} className={ed?.activeClass === c.id ? "on" : ""} title={`Clase ${c.name} (${c.digit}): lo que recibe una caja al presionarla, moverla o dibujarla`} onClick={() => setClass(c.id)} {...nb}>
-                  <span className="dot" style={{ background: c.color }} />{c.name}<kbd>{c.digit}</kbd>
-                </button>
+          {activeTab === "video" && pl && pui && <VideoTab player={pl} ui={pui} />}
+          {activeTab === "review" && detail && <ReviewTab frame={detail} classes={classes} editor={ed} pid={project.id} onChanged={() => void refreshMeta(detail.id)} onViewing={setViewing} />}
+          <section id="annot" className="sec2">
+            <h3 className="h3b" title="Cuántas cajas hay de cada clase en esta imagen">Anotaciones</h3>
+            <ul className="alist" id="alist">
+              <li title="Cajas propuestas por el detector que todavía no has clasificado"><i className="dot" style={{ background: "#d1d5db" }} /><span>Sin etiquetar</span><b id="cU">{cnt.unlabeled}</b></li>
+              {classes.filter((c) => !c.negative || (cnt.byLabel[c.id] ?? 0) > 0).map((c) => (
+                <li key={c.id} title={c.negative ? "Cajas que marcaste como «ni piojo ni mosca» (o que se marcaron al revisar)" : `Cajas de clase ${c.name} en esta imagen`}><i className="dot" style={{ background: c.color }} /><span>{c.negative ? c.name : plural(c.name)}</span><b id={"c_" + c.id}>{cnt.byLabel[c.id] ?? 0}</b></li>
               ))}
-              <button id="bbox" className={eui?.drawMode ? "on" : ""} disabled={!canWrite} title="Dibujar una caja nueva sobre la imagen (B); recibe la clase activa" onClick={() => ed?.setDrawMode(!ed.drawMode)} {...nb}>＋ Caja<kbd>B</kbd></button>
-            </div>
-          </section>
-          {detail && (project.role === "admin" || project.role === "reviewer") && (
-            <ReviewPanel frame={detail} classes={classes} editor={ed} pid={project.id} onChanged={() => void refreshMeta(detail.id)} />
-          )}
-          <details className="sec" id="s-leyenda" open={LS.get("sec_s-leyenda") === "1"} onToggle={(e) => LS.set("sec_s-leyenda", (e.target as HTMLDetailsElement).open ? "1" : "0")}>
-            <summary title="Qué significa cada color de caja y cuántas hay en esta imagen y en todo el proyecto">Leyenda y resumen</summary>
-            <div className="body">
-              <div className="leg">
-                <div><span className="sw unl" style={{ borderColor: "var(--unl)" }} /><span>Sin etiquetar<small>propuesta del detector</small></span><span className="n" id="cU">{cnt.unlabeled}</span></div>
-                {classes.map((c) => (
-                  <div key={c.id}><span className="sw" style={{ borderColor: c.color }} /><span>{c.name}{c.negative && <small>cajas sin tocar al revisar</small>}</span><span className="n" id={"c_" + c.id}>{cnt.byLabel[c.id] ?? 0}</span></div>
-                ))}
-              </div>
-              <p className="hint">Los números son de esta imagen. En cada caja: {Object.entries(sources).map(([k, v], i) => <span key={k}>{i ? ", " : ""}<b>{v.short}</b> = {v.name.toLowerCase()}</span>)}.</p>
-              <h2 style={{ margin: "6px 0 2px", fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)" }}>Todo el set</h2>
-              <div className="stats" id="stats">
-                {classes.map((c) => <Fragment key={c.id}><span>{c.name}</span><span>{st?.by_label[c.id] ?? 0}</span></Fragment>)}
-                <span>Dibujadas a mano</span><span>{st?.manual ?? 0}</span>
-                <span>Sin etiquetar</span><span>{st?.unlabeled ?? 0}</span>
-                <span>Cuadros borrados</span><span>{st?.deleted ?? 0}</span>
+            </ul>
+            <div id="restoreRow" className="restore2" hidden={!eui?.deletedCount}>
+              <span id="rtext">{eui?.deletedCount} cuadro{eui && eui.deletedCount > 1 ? "s" : ""} borrado{eui && eui.deletedCount > 1 ? "s" : ""} en esta imagen</span>
+              <div className="rbtns">
+                <button id="rrlast" className="btn sm" title="Restaurar el último cuadro borrado (Z)" onClick={() => ed?.restore(false)} onMouseDown={(e) => e.preventDefault()}>Restaurar último</button>
+                <button id="rrall" className="btn sm" title="Restaurar todos los cuadros borrados de esta imagen" onClick={() => ed?.restore(true)} onMouseDown={(e) => e.preventDefault()}>Restaurar todos</button>
               </div>
             </div>
-          </details>
-          <section className="blk" id="s-proyecto">
-            <h3 title="Proyecto abierto y tu rol en él">Proyecto <span className="sx">{project.role}</span></h3>
-            <div className="pjname" title="Proyecto abierto"><b>{project.name}</b></div>
-            {(project.role === "admin" || project.role === "reviewer") && (
-              <button id="adminbtn" className="full" onClick={onAdmin} title="Gestión del proyecto: calidad, reparto, datasets, entrenamiento, evaluación, equipo y sistema" {...nb}>⚙ Gestión del proyecto</button>
+            <button id="legendbtn" className="linkbtn" aria-expanded={legendOpen} title="Mostrar la leyenda de las cajas, el resumen de todo el proyecto y los atajos" onClick={() => { setLegendOpen(!legendOpen); LS.set("legend_open", legendOpen ? "0" : "1"); }} onMouseDown={(e) => e.preventDefault()}>
+              <Icon name={legendOpen ? "down" : "right"} size={12} /> Leyenda y atajos
+            </button>
+            {legendOpen && (
+              <div id="s-leyenda" className="legend2">
+                <p className="hint">En cada caja: {Object.entries(sources).map(([k, v], i) => <span key={k}>{i ? ", " : ""}<b>{v.short}</b> = {v.name.toLowerCase()}</span>)}. Línea punteada = sin etiquetar.</p>
+                <h4 className="cap">Todo el proyecto</h4>
+                <div className="stats" id="stats">
+                  <span>Revisadas por ti</span><span id="pcount">{reviewedN} / {st?.frames ?? frames.length}</span>
+                  {classes.map((c) => <Fragment key={c.id}><span>{c.name}</span><span>{st?.by_label[c.id] ?? 0}</span></Fragment>)}
+                  <span>Dibujadas a mano</span><span>{st?.manual ?? 0}</span>
+                  <span>Sin etiquetar</span><span>{st?.unlabeled ?? 0}</span>
+                  <span>Cuadros borrados</span><span>{st?.deleted ?? 0}</span>
+                </div>
+                <button className="linkbtn" title="Ver todos los atajos de teclado" onClick={() => setHelp(true)} onMouseDown={(e) => e.preventDefault()}>Ver todos los atajos de teclado</button>
+              </div>
             )}
           </section>
         </div>
+        <div className="sidefoot">
+          <button id="skip" className="btn" title="Salta a la siguiente imagen que tú aún no has revisado (S)" onClick={skipPending} onMouseDown={(e) => e.preventDefault()}><Icon name="skipFwd" size={13} /> Saltar imagen</button>
+          <button id="rev" className="btn green" disabled={!canWrite} title="Marca la imagen como revisada: las cajas que no tocaste pasan a «ni piojo ni mosca» y se pasa a la siguiente (Espacio)" onClick={markRev} onMouseDown={(e) => e.preventDefault()}>
+            <Icon name="check" size={14} /><span className="two"><b>Revisado y siguiente</b><kbd>Espacio</kbd></span>
+          </button>
+        </div>
       </aside>
-      <Carousel frames={frames} curId={curId} classes={classes} filter={filter} setFilter={setFilter} go={setCurId} />
+      <Carousel frames={frames} curId={curId} filter={filter} setFilter={setFilter} go={setCurId} onPrev={() => goIdx(cur - 1)} onNext={() => goIdx(cur + 1)}
+        gotoVal={gotoVal} setGotoVal={setGotoVal} onGoto={gotoNum} reviewed={reviewedN} total={st?.frames ?? frames.length} />
       {help && <HelpModal onClose={() => setHelp(false)} />}
     </div>
   );

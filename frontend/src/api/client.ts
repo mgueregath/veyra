@@ -1,8 +1,9 @@
 export interface Me { id: number; username: string; display_name: string | null; is_superuser: boolean }
 export interface ClassDef { id: string; name: string; key?: string; digit?: string; color: string; negative?: boolean }
 export interface SourceDef { short: string; name: string }
-export interface ProjectConfig { classes: ClassDef[]; box_sources?: Record<string, SourceDef> }
-export interface Project { id: number; slug: string; name: string; role: string; config: ProjectConfig; n_frames: number; n_reviewed: number }
+export interface ProjectConfig { classes: ClassDef[]; box_sources?: Record<string, SourceDef>; description?: string }
+export interface Project { id: number; slug: string; name: string; role: string; config: ProjectConfig; n_frames: number; n_reviewed: number; cover_frame_id: number | null }
+export interface ProjectPatch { name?: string; description?: string; classes?: Partial<ClassDef>[] }
 export interface Proposal { id: number; bbox: [number, number, number, number]; sources: string[]; score: number | null }
 export interface AnnBox { id?: number | null; proposal_id?: number | null; bbox: [number, number, number, number]; label: string | null; manual: boolean; orig_bbox?: number[] | null; sources: string[]; score: number | null; deleted: boolean }
 export interface Annotation { reviewed: boolean; boxes: AnnBox[] }
@@ -11,7 +12,7 @@ export interface FrameDetail { id: number; position: number; video: string; vide
 export type Status = "pending" | "single" | "agreed" | "disagreement" | "final";
 export type FrameFilter = "all" | "mine_pending" | "assigned_pending" | "pending" | "single" | "agreed" | "disagreement" | "final" | "needs_review";
 export interface FrameItem { id: number; position: number; video: string; frame_index: number; t: number | null; stratum: string | null; reviewed: boolean; origin: string | null; status: Status; assigned: boolean; n_labeled: Record<string, number> }
-export interface UserAnnotation { user_id: number; user: string; reviewed: boolean; boxes: AnnBox[] }
+export interface UserAnnotation { user_id: number; user: string; display_name?: string | null; reviewed: boolean; boxes: AnnBox[] }
 export interface Member { username: string; display_name: string | null; role: string }
 export interface Quality { frames: number; status: Record<Status, number>; users: { user: string; reviewed: number; boxes: Record<string, number> }[]; agreement: { frames_with_overlap: number; mean_f1: number | null; agree_rate: number | null } }
 export interface DatasetSummary { id: number; name: string; n_items: number; rules: { include: string[]; split: number[]; seed: string }; created_at: string }
@@ -29,18 +30,22 @@ export interface RunSummary { id: number; kind: string; name: string; status: st
   summary: { map: number | null; precision: number | null; recall: number | null; f1: number | null; score_threshold: number | null; count_mae: number | null; split: string | null; dataset: string | null; progress?: { epoch: number; epochs: number; metrics: Record<string, number> } | { done: number; total: number } | null; map50?: number | null; boxes?: number | null };
   metrics?: (EvalMetrics & { progress?: { epoch: number; epochs: number; metrics: Record<string, number> } | null; map50?: number }) | null; log?: string | null }
 export interface PreProgress { done: number; total: number }
-export interface ModelInfo { id: number; name: string; arch: string; classes: string[]; dataset_version_id: number | null; metrics: { map50?: number; map50_95?: number; precision?: number; recall?: number } | null; created_at: string; created_by: string }
+export interface ModelInfo { id: number; name: string; arch: string; classes: string[]; params?: { imgsz?: number }; dataset_version_id: number | null; metrics: { map50?: number; map50_95?: number; precision?: number; recall?: number } | null; created_at: string; created_by: string }
 export interface UncertainItem { frame_id: number; score: number; uncertainty: number; reasons: string[]; position: number; width: number; height: number; video_id: number }
 export interface LiveStats {
   frames: number; fps: number; latency_ms: number; size: [number, number] | null; source_fps: number; dropped: number; reconnects: number;
   open_failures: number; ended: boolean; error: string; threshold: number; paused: boolean; recording: boolean; record_path: string;
   totals: Record<string, number>; active: number; classes: string[]; record_error?: string;
+  show_boxes?: boolean; show_conf?: boolean; show_classes?: number[] | null;
 }
 export interface LiveSession {
   id: number; name: string; status: "starting" | "running" | "stopped" | "failed"; source_kind: "video" | "url"; source: string; model_id: number | null;
   params: { threshold: number; imgsz: number; loop: boolean }; started_at: string; ended_at: string | null; user: string | null; error: string | null;
   summary: LiveStats | null; stats: LiveStats | null;
 }
+export interface Detection { bbox: [number, number, number, number]; label: string; score: number }
+export interface DetectItem { index: number; name: string; frame_id: number | null; width: number; height: number; image_url: string; dets: Detection[] }
+export interface DetectResult { id: string; model_id: number; model: string; classes: string[]; items: DetectItem[] }
 export interface ProjectVideo { id: number; name: string; has_file: boolean }
 export interface TeamMember { username: string; display_name: string | null; active: boolean; role: string }
 export interface Usage { images: { files: number; bytes: number }; videos: { files: number; bytes: number }; models: { bytes: number }; exports: { bytes: number }; owned_bytes: number; quota_bytes: number | null; over_quota: boolean }
@@ -68,6 +73,8 @@ export const api = {
   login: (username: string, password: string) => req<Me>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   projects: () => req<Project[]>("/api/projects"),
+  createProject: (body: { name: string; description?: string }) => req<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
+  updateProject: (pid: number, body: ProjectPatch) => req<Project>(`/api/projects/${pid}`, { method: "PATCH", body: JSON.stringify(body) }),
   frames: (pid: number, offset = 0, limit = 500, filter: FrameFilter = "all") => req<FrameItem[]>(`/api/projects/${pid}/frames?offset=${offset}&limit=${limit}&filter=${filter}`),
   /** Carga el listado completo por páginas (la API limita cada petición a 500). */
   allFrames: async (pid: number, filter: FrameFilter = "all") => {
@@ -105,10 +112,23 @@ export const api = {
   liveList: (pid: number) => req<LiveSession[]>(`/api/projects/${pid}/live`),
   liveStart: (pid: number, body: { source_kind: "video" | "url"; video_id?: number; url?: string; model_id?: number | null; threshold: number; imgsz: number; name?: string }) => req<LiveSession>(`/api/projects/${pid}/live`, { method: "POST", body: JSON.stringify(body) }),
   liveGet: (id: number) => req<LiveSession>(`/api/live/${id}`),
-  liveControl: (id: number, body: { threshold?: number; paused?: boolean; record?: boolean }) => req<{ threshold: number; paused: boolean; recording: boolean }>(`/api/live/${id}/control`, { method: "POST", body: JSON.stringify(body) }),
+  liveControl: (id: number, body: { threshold?: number; paused?: boolean; record?: boolean; show_boxes?: boolean; show_conf?: boolean; show_classes?: number[] | null }) => req<{ threshold: number; paused: boolean; recording: boolean }>(`/api/live/${id}/control`, { method: "POST", body: JSON.stringify(body) }),
   liveSave: (id: number) => req<{ frame_id: number; position: number; boxes: number }>(`/api/live/${id}/save-frame`, { method: "POST" }),
   liveStop: (id: number) => req<LiveSession>(`/api/live/${id}`, { method: "DELETE" }),
   liveClips: (id: number) => req<{ name: string; bytes: number }[]>(`/api/live/${id}/clips`),
+  detectFrames: (pid: number, body: { model_id: number; first: number; last?: number }) => req<DetectResult>(`/api/projects/${pid}/detect`, { method: "POST", body: JSON.stringify(body) }),
+  detectUpload: async (pid: number, modelId: number, files: File[]): Promise<DetectResult> => {
+    const fd = new FormData();
+    fd.append("model_id", String(modelId));
+    files.forEach((f) => fd.append("files", f));
+    const r = await fetch(`/api/projects/${pid}/detect/upload`, { method: "POST", body: fd, credentials: "same-origin" });
+    if (!r.ok) {
+      let msg = r.statusText;
+      try { msg = (await r.json()).detail ?? msg; } catch { /* sin cuerpo JSON */ }
+      throw new ApiError(r.status, typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
+    return r.json() as Promise<DetectResult>;
+  },
   liveStreamUrl: (id: number) => `/api/live/${id}/stream`,
   clipUrl: (id: number, name: string) => `/api/live/${id}/clips/${name}`,
   team: (pid: number) => req<TeamMember[]>(`/api/projects/${pid}/team`),

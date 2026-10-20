@@ -1,38 +1,60 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import UserMenu from "../components/UserMenu";
+import Icon, { type IconName } from "../components/Icon";
+import TopNav from "../components/TopNav";
 import { api, type DatasetStats, type EvalExample, type Project, type RunSummary, type Status } from "../api/client";
 
 const STATUS_LABEL: Record<Status, string> = {
   pending: "Nadie la revisó", single: "Revisada por 1 persona", agreed: "Varias, de acuerdo", disagreement: "Varias, en desacuerdo", final: "Final (decidió el revisor)",
 };
 
-export default function AdminPage({ project, user, onBack, onProjects, onLogout }: { project: Project; user: string; onBack: () => void; onProjects: () => void; onLogout: () => void }) {
-  const [tab, setTab] = useState<"quality" | "assign" | "datasets" | "train" | "assist" | "eval" | "team" | "system">("quality")
+type Tab = "quality" | "assign" | "datasets" | "train" | "assist" | "eval" | "team" | "config" | "system";
+const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: string; sub: (n: string) => string }[] = [
+  { k: "quality", label: "Calidad", icon: "shield", title: "Calidad del etiquetado", hint: "Estado del etiquetado, acuerdo entre personas y trabajo de cada una", sub: (n) => `Resumen del estado del etiquetado, acuerdo entre anotadores y trabajo por persona en el proyecto ${n}.` },
+  { k: "assign", label: "Asignaciones", icon: "users", title: "Asignaciones", hint: "Reparto de imágenes entre el equipo", sub: () => "Reparte imágenes pendientes y organiza el trabajo del equipo." },
+  { k: "datasets", label: "Datasets", icon: "database", title: "Versiones del dataset", hint: "Versiones congeladas del dataset y su exportación", sub: () => "Instantáneas congeladas de las anotaciones y divisiones estables basadas en video." },
+  { k: "train", label: "Entrenamiento", icon: "cpu", title: "Entrenamiento", hint: "Entrenar modelos en la GPU", sub: () => "Entrena un detector y compara sus resultados." },
+  { k: "assist", label: "Asistido", icon: "sparkles", title: "Etiquetado asistido", hint: "Preanotar con un modelo y buscar las imágenes más inciertas", sub: () => "Usa el modelo para proponer cajas y priorizar imágenes." },
+  { k: "eval", label: "Evaluación", icon: "chart", title: "Evaluación de detectores", hint: "Medir detectores y modelos sobre un dataset", sub: () => "Compara resultados sobre una misma versión y partición." },
+  { k: "team", label: "Equipo", icon: "users", title: "Equipo del proyecto", hint: "Personas y roles del proyecto", sub: (n) => `Administra las personas y sus permisos en ${n}.` },
+  { k: "config", label: "Configuración", icon: "gear", title: "Configuración del proyecto", hint: "Nombre, descripción y etiquetas del proyecto", sub: () => "Define la identidad del proyecto y las clases de anotación." },
+  { k: "system", label: "Sistema", icon: "server", title: "Sistema y almacenamiento", hint: "Uso de disco, estado del servicio, copia del proyecto y tu contraseña", sub: () => "Consulta el uso del proyecto y la actividad del servicio." },
+];
+
+export default function AdminPage({ project, user, onBack, onProjects, onModels, onLogout }: { project: Project; user: string; onBack: () => void; onProjects: () => void; onModels: () => void; onLogout: () => void }) {
+  const [tab, setTab] = useState<Tab>("quality");
   const [preset, setPreset] = useState<string | null>(null);
   const isAdmin = project.role === "admin";
+  const sec = SECTIONS.find((x) => x.k === tab)!;
   return (
-    <div className="page">
-      <header className="pagehead">
-        <b>LabelHub</b>
-        <span className="mut">· {project.name} · Gestión</span>
-        <span className="grow" />
-        <button title="Volver a la pantalla de etiquetado del proyecto" onClick={onBack}>← Etiquetar</button>
-        <UserMenu user={user} role={project.role} projectName={project.name} onProjects={onProjects} onLogout={onLogout} />
-      </header>
-      <div className="tabs">
-        {([["quality", "Calidad"], ["assign", "Asignaciones"], ["datasets", "Datasets"], ["train", "Entrenamiento"], ["assist", "Asistido"], ["eval", "Evaluación"], ["team", "Equipo"], ["system", "Sistema"]] as const).map(([k, l]) => (
-          <button title={{ quality: "Estado del etiquetado, acuerdo entre personas y trabajo de cada una", assign: "Reparto de imágenes entre el equipo", datasets: "Versiones congeladas del dataset y su exportación", train: "Entrenar modelos en la GPU", assist: "Preanotar con un modelo y buscar las imágenes más inciertas", eval: "Medir detectores y modelos sobre un dataset", team: "Personas y roles del proyecto", system: "Uso de disco, estado del servicio, copia del proyecto y tu contraseña" }[k]} key={k} id={"tab-" + k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>
-        ))}
+    <div className="page adm-page">
+      <TopNav project={project} user={user} active="admin" onProjects={onProjects} onLabel={onBack} onModels={onModels} onAdmin={() => undefined} onLogout={onLogout} />
+      <div className="adm">
+        <nav className="adm-side" aria-label="Gestión del proyecto">
+          <div className="adm-cap">Gestión del proyecto</div>
+          {SECTIONS.map((x) => (
+            <span key={x.k} className="adm-grp">
+              {x.k === "team" && <hr />}
+              <button title={x.hint} id={"tab-" + x.k} className={"adm-item" + (tab === x.k ? " on" : "")} aria-current={tab === x.k ? "page" : undefined} onClick={() => setTab(x.k)}><Icon name={x.icon} size={19} />{x.label}</button>
+            </span>
+          ))}
+        </nav>
+        <main className="adm-main">
+          <div className="adm-head">
+            <div><h1>{sec.title}</h1><p>{sec.sub(project.name)}</p></div>
+            {tab === "quality" && <button className="btn-outline" id="adm-golabel" onClick={onBack}>Ir a etiquetar <Icon name="external" size={16} /></button>}
+          </div>
+          {tab === "quality" && <Quality project={project} />}
+          {tab === "assign" && <Assign project={project} isAdmin={isAdmin} />}
+          {tab === "datasets" && <Datasets project={project} isAdmin={isAdmin} />}
+          {tab === "train" && <Training project={project} onEvaluate={(id) => { setPreset(`model:${id}`); setTab("eval"); }} />}
+          {tab === "assist" && <Assisted project={project} isAdmin={isAdmin} />}
+          {tab === "eval" && <Evaluation project={project} preset={preset} />}
+          {tab === "team" && <Team project={project} isAdmin={isAdmin} me={user} />}
+          {tab === "config" && <Settings project={project} isAdmin={isAdmin} />}
+          {tab === "system" && <System project={project} isAdmin={isAdmin} />}
+        </main>
       </div>
-      {tab === "quality" && <Quality project={project} />}
-      {tab === "assign" && <Assign project={project} isAdmin={isAdmin} />}
-      {tab === "datasets" && <Datasets project={project} isAdmin={isAdmin} />}
-      {tab === "train" && <Training project={project} onEvaluate={(id) => { setPreset(`model:${id}`); setTab("eval"); }} />}
-      {tab === "assist" && <Assisted project={project} isAdmin={isAdmin} />}
-      {tab === "eval" && <Evaluation project={project} preset={preset} />}
-      {tab === "team" && <Team project={project} isAdmin={isAdmin} me={user} />}
-      {tab === "system" && <System project={project} isAdmin={isAdmin} />}
     </div>
   );
 }
@@ -42,20 +64,39 @@ function Quality({ project }: { project: Project }) {
   if (q.isLoading) return <div className="center">Cargando…</div>;
   if (!q.data) return <div className="center err">{(q.error as Error)?.message ?? "Sin datos"}</div>;
   const d = q.data, cls = project.config.classes.filter((c) => !c.negative);
-  const pct = (x: number | null) => (x === null ? "—" : (100 * x).toFixed(1) + " %");
+  const pct = (x: number | null) => (x === null ? "—" : (100 * x).toFixed(1).replace(".", ",") + " %");
+  const reviewed = d.frames - d.status.pending;
+  const bar: Record<Status, string> = { pending: "#c5cde0", single: "#0866ff", agreed: "#079447", disagreement: "#ef4444", final: "#7c3aed" };
   return (
-    <div className="panel" id="quality">
-      <h2>Estado del etiquetado ({d.frames} imágenes)</h2>
-      <table className="tbl"><tbody>
-        {(Object.keys(STATUS_LABEL) as Status[]).map((s) => <tr key={s}><td>{STATUS_LABEL[s]}</td><td id={"qs-" + s}>{d.status[s]}</td></tr>)}
-      </tbody></table>
-      <h2>Acuerdo entre anotadores</h2>
-      <p className="mut">Imágenes revisadas por 2 o más personas: <b id="q-overlap">{d.agreement.frames_with_overlap}</b> · coinciden del todo: <b>{pct(d.agreement.agree_rate)}</b> · F1 medio entre pares (IoU ≥ 0,5, misma clase): <b>{pct(d.agreement.mean_f1)}</b></p>
-      <h2>Trabajo por persona</h2>
-      <table className="tbl">
-        <thead><tr><th>Usuario</th><th>Revisadas</th>{cls.map((c) => <th key={c.id}>{c.name}</th>)}</tr></thead>
-        <tbody>{d.users.map((u) => <tr key={u.user}><td>{u.user}</td><td>{u.reviewed}</td>{cls.map((c) => <td key={c.id}>{u.boxes[c.id] ?? 0}</td>)}</tr>)}</tbody>
-      </table>
+    <div id="quality" className="stack">
+      <div className="stats4">
+        <div className="statc"><span className="static blue"><Icon name="image" size={24} /></span><div><b>{d.frames}</b><small>Imágenes</small></div></div>
+        <div className="statc"><span className="static purple"><Icon name="users" size={24} /></span><div><b>{reviewed}</b><small>Con revisión</small></div></div>
+        <div className="statc"><span className="static green"><Icon name="checkCircle" size={24} /></span><div><b>{pct(d.agreement.agree_rate)}</b><small>Acuerdo total</small></div></div>
+        <div className="statc"><span className="static red"><Icon name="alertCircle" size={24} /></span><div><b id="q-disagree">{d.status.disagreement}</b><small>Desacuerdo</small></div></div>
+      </div>
+      <div className="grid2">
+        <section className="card">
+          <h2><span className="hic"><Icon name="image" size={17} /></span><span>Estado del etiquetado<small>Distribución de las imágenes según su estado de revisión.</small></span></h2>
+          <div className="stackbar" aria-hidden>{(Object.keys(STATUS_LABEL) as Status[]).map((s) => d.status[s] > 0 && <i key={s} style={{ flex: d.status[s], background: bar[s] }} />)}</div>
+          <table className="tbl"><thead><tr><th>Estado</th><th className="num">Imágenes</th><th className="num">Porcentaje</th></tr></thead><tbody>
+            {(Object.keys(STATUS_LABEL) as Status[]).map((s) => <tr key={s}><td><i className="dot" style={{ background: bar[s] }} /> {STATUS_LABEL[s]}</td><td className="num" id={"qs-" + s}>{d.status[s]}</td><td className="num">{d.frames ? (100 * d.status[s] / d.frames).toFixed(1).replace(".", ",") : "0,0"} %</td></tr>)}
+          </tbody></table>
+        </section>
+        <section className="card">
+          <h2><span className="hic"><Icon name="users" size={17} /></span><span>Acuerdo entre anotadores<small>{d.agreement.frames_with_overlap} imágenes con dos o más revisiones.</small></span></h2>
+          <p className="srsum">Imágenes revisadas por 2 o más personas: <b id="q-overlap">{d.agreement.frames_with_overlap}</b></p>
+          <div className="bignums"><div><b>{pct(d.agreement.agree_rate)}</b><span>coinciden del todo</span><small>de {d.agreement.frames_with_overlap} imágenes</small></div><div><b>{pct(d.agreement.mean_f1)}</b><span>F1 medio</span><small>IoU ≥ 0,5 · misma clase</small></div></div>
+          {d.status.disagreement > 0 && <div className="callout warnc"><Icon name="alert" size={18} /><span>{d.status.disagreement} {d.status.disagreement === 1 ? "imagen necesita" : "imágenes necesitan"} revisión.</span></div>}
+        </section>
+      </div>
+      <section className="card">
+        <h2><span className="hic"><Icon name="users" size={17} /></span><span>Trabajo por persona<small>Imágenes revisadas y objetos etiquetados por cada miembro del equipo.</small></span></h2>
+        <table className="tbl">
+          <thead><tr><th>Usuario</th><th className="num">Revisadas</th>{cls.map((c) => <th className="num" key={c.id}>{c.name}</th>)}</tr></thead>
+          <tbody>{d.users.map((u) => <tr key={u.user}><td>{u.user}</td><td className="num">{u.reviewed}</td>{cls.map((c) => <td className="num" key={c.id}>{u.boxes[c.id] ?? 0}</td>)}</tr>)}</tbody>
+        </table>
+      </section>
     </div>
   );
 }
@@ -73,26 +114,43 @@ function Assign({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
   });
   const workers = (members.data ?? []).filter((m) => m.role !== "viewer");
   return (
-    <div className="panel" id="assign">
-      <h2>Repartir imágenes</h2>
-      <p className="mut">Reparte entre las personas elegidas las imágenes que aún no tienen dueño ni revisión. «Doble etiquetado» asigna además ese % a una segunda persona, para medir el acuerdo.</p>
-      <div className="formrow">
-        {workers.map((m) => (
-          <label key={m.username}><input title="Incluir a esta persona en el reparto de imágenes" type="checkbox" checked={sel.includes(m.username)} onChange={(e) => setSel(e.target.checked ? [...sel, m.username] : sel.filter((x) => x !== m.username))} /> {m.username} <span className="mut">({m.role})</span></label>
-        ))}
-      </div>
-      <div className="formrow">
-        <label>Doble etiquetado <input title="Porcentaje de imágenes que además se asignan a una segunda persona, para medir el acuerdo entre quienes etiquetan" type="number" min={0} max={100} value={overlap} onChange={(e) => setOverlap(+e.target.value)} style={{ width: 70 }} /> %</label>
-        <label>Semilla <input title="Semilla del reparto: con la misma semilla el reparto sale igual" type="number" value={seed} onChange={(e) => setSeed(+e.target.value)} style={{ width: 70 }} /></label>
-        <button title="Reparte entre las personas elegidas las imágenes que aún no tienen dueño ni revisión" className="primary" id="assign-go" disabled={!isAdmin || !sel.length || run.isPending} onClick={() => run.mutate()}>Repartir</button>
-        {!isAdmin && <span className="mut">Solo un administrador puede repartir.</span>}
-      </div>
-      {run.data && <p className="okmsg" id="assign-res">Repartidas {run.data.frames} imágenes ({run.data.created} asignaciones nuevas, {run.data.overlap} con doble etiquetado).</p>}
-      {run.error && <p className="err">{(run.error as Error).message}</p>}
-      <table className="tbl">
-        <thead><tr><th>Usuario</th><th>Asignadas</th><th>Hechas</th></tr></thead>
-        <tbody>{(summary.data ?? []).map((r) => <tr key={r.user}><td>{r.user}</td><td>{r.assigned}</td><td>{r.done}</td></tr>)}</tbody>
-      </table>
+    <div className="grid2 assign-grid" id="assign">
+      <section className="card">
+        <h2><span>Repartir imágenes</span></h2>
+        <p className="mut">Reparte entre las personas elegidas las imágenes que aún no tienen dueño ni revisión. «Doble etiquetado» asigna además ese % a una segunda persona, para medir el acuerdo.</p>
+        <h3>Personas del equipo</h3>
+        <div className="people">
+          {workers.map((m) => (
+            <label key={m.username} className="person"><input title="Incluir a esta persona en el reparto de imágenes" type="checkbox" checked={sel.includes(m.username)} onChange={(e) => setSel(e.target.checked ? [...sel, m.username] : sel.filter((x) => x !== m.username))} /><i className="avatar sm">{m.username.slice(0, 1).toUpperCase()}</i>{m.username}<span className="rolechip">{ROLE_TEXT[m.role] ?? m.role}</span></label>
+          ))}
+        </div>
+        <div className="formrow">
+          <label className="fld">Doble etiquetado<span className="withunit"><input title="Porcentaje de imágenes que además se asignan a una segunda persona, para medir el acuerdo entre quienes etiquetan" type="number" min={0} max={100} value={overlap} onChange={(e) => setOverlap(+e.target.value)} /><b>%</b></span></label>
+          <label className="fld">Semilla<input title="Semilla del reparto: con la misma semilla el reparto sale igual" type="number" value={seed} onChange={(e) => setSeed(+e.target.value)} /></label>
+        </div>
+        <div className="formrow">
+          <button title="Reparte entre las personas elegidas las imágenes que aún no tienen dueño ni revisión" className="primary" id="assign-go" disabled={!isAdmin || !sel.length || run.isPending} onClick={() => run.mutate()}>Repartir imágenes</button>
+          {!isAdmin && <span className="mut">Solo un administrador puede repartir.</span>}
+        </div>
+        {run.data && <p className="okmsg" id="assign-res">Repartidas {run.data.frames} imágenes ({run.data.created} asignaciones nuevas, {run.data.overlap} con doble etiquetado).</p>}
+        {run.error && <p className="err">{(run.error as Error).message}</p>}
+      </section>
+      <aside className="card how">
+        <h2><span>Cómo funciona</span></h2>
+        <ol>
+          <li><b>1</b><div><strong>Selecciona personas</strong><span>Elige los miembros del equipo que recibirán imágenes para etiquetar.</span></div></li>
+          <li><b>2</b><div><strong>Reparte las pendientes</strong><span>Se asignarán automáticamente las imágenes pendientes entre las personas seleccionadas.</span></div></li>
+          <li><b>3</b><div><strong>Mide el acuerdo</strong><span>Un porcentaje de las imágenes se asignará también a una segunda persona para evaluar la consistencia de las etiquetas.</span></div></li>
+        </ol>
+      </aside>
+      <section className="card wide">
+        <h2><span>Carga de trabajo</span></h2>
+        <table className="tbl">
+          <thead><tr><th>Persona</th><th className="num">Asignadas</th><th className="num">Hechas</th><th className="num">Pendientes</th></tr></thead>
+          <tbody>{(summary.data ?? []).map((r) => <tr key={r.user}><td>{r.user}</td><td className="num">{r.assigned}</td><td className="num">{r.done}</td><td className="num">{r.assigned - r.done}</td></tr>)}
+            {!summary.data?.length && <tr><td colSpan={4} className="emptyrow"><Icon name="users" size={20} /><br />Aún no hay asignaciones.<small>Reparte imágenes para ver aquí la carga de trabajo del equipo.</small></td></tr>}</tbody>
+        </table>
+      </section>
     </div>
   );
 }
@@ -134,6 +192,7 @@ function Datasets({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
         {sum !== 100 && <span className="warn">El reparto debe sumar 100 (suma {sum})</span>}
         {!isAdmin && <span className="mut">Solo un administrador puede crear versiones.</span>}
       </div>
+      <div className="distbar" aria-label="Distribución del dataset"><i style={{ flex: split[0], background: "#0866ff" }} /><i style={{ flex: split[1], background: "#22b573" }} /><i style={{ flex: split[2], background: "#fb923c" }} /></div>
       {create.error && <p className="err" id="ds-err">{(create.error as Error).message}</p>}
       <table className="tbl" id="ds-list">
         <thead><tr><th>Versión</th><th>Imágenes</th><th>Creada</th><th /></tr></thead>
@@ -401,6 +460,85 @@ function Assisted({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
 const ROLE_TEXT: Record<string, string> = { admin: "administrador", reviewer: "revisor", labeler: "etiquetador", viewer: "lector" };
 const mb = (n: number) => (n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : (n / 1e6).toFixed(1) + " MB");
 
+interface Row { id?: string; name: string; color: string; shortcut: string; negative: boolean; key?: string; digit?: string }
+const rowsOf = (p: Project): Row[] => p.config.classes.map((c) => ({ id: c.id, name: c.name, color: c.color, shortcut: (c.digit ?? c.key ?? "").toUpperCase(), negative: !!c.negative, key: c.key, digit: c.digit }));
+const NEW_COLORS = ["#f59e0b", "#06b6d4", "#ec4899", "#84cc16", "#6366f1", "#14b8a6"];
+
+/** Nombre, descripción y etiquetas (clases) del proyecto. Las etiquetas existentes conservan su id al renombrarse. */
+function Settings({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(project.name);
+  const [desc, setDesc] = useState(project.config.description ?? "");
+  const [rows, setRows] = useState<Row[]>(() => rowsOf(project));
+  const [msg, setMsg] = useState<{ t: string; ok: boolean } | null>(null);
+  const reset = () => { setName(project.name); setDesc(project.config.description ?? ""); setRows(rowsOf(project)); };
+  useEffect(() => { reset(); setMsg((m) => m); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [project]);
+  const dirty = name !== project.name || desc !== (project.config.description ?? "") || JSON.stringify(rows) !== JSON.stringify(rowsOf(project));
+  const set = (i: number, patch: Partial<Row>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const save = useMutation({
+    mutationFn: () => api.updateProject(project.id, {
+      name: name.trim(), description: desc,
+      classes: rows.map((r) => {
+        const same = r.id && r.shortcut === (r.digit ?? r.key ?? "").toUpperCase();
+        const sc = r.shortcut.trim().toLowerCase();
+        return { id: r.id, name: r.name.trim(), color: r.color, negative: r.negative,
+          ...(same ? { key: r.key, digit: r.digit } : /^[1-9]$/.test(sc) ? { digit: sc } : sc ? { key: sc.slice(0, 1) } : {}) };
+      }),
+    }),
+    onSuccess: () => { setMsg({ t: "Cambios guardados.", ok: true }); void qc.invalidateQueries({ queryKey: ["projects"] }); },
+    onError: (e) => setMsg({ t: (e as Error).message, ok: false }),
+  });
+  const bad = !name.trim() || rows.some((r) => !r.name.trim()) || !rows.some((r) => !r.negative);
+  const dis = !isAdmin;
+  return (
+    <div id="config" className="stack">
+      {dis && <p className="mut">Solo un administrador puede cambiar la configuración del proyecto.</p>}
+      <div className="grid2 cfg-top">
+        <section className="card">
+          <h2><span>Información general</span></h2>
+          <label className="fld">Nombre del proyecto<input id="cfg-name" type="text" maxLength={128} disabled={dis} value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label className="fld">Descripción<textarea id="cfg-desc" rows={4} maxLength={1000} disabled={dis} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+        </section>
+        <section className="card cover">
+          <h2><span>Portada del proyecto</span></h2>
+          {project.cover_frame_id ? <img src={api.thumbUrl(project.cover_frame_id)} alt="Primera imagen del proyecto" /> : <div className="nocover"><Icon name="image" size={32} /></div>}
+          <small className="mut">Se usa la primera imagen del proyecto.</small>
+        </section>
+      </div>
+      <div className="grid2 cfg-labels">
+        <section className="card">
+          <h2><span>Etiquetas de anotación<small>Estas clases estarán disponibles al dibujar y clasificar cajas.</small></span></h2>
+          <table className="tbl" id="cfg-classes">
+            <thead><tr><th>Etiqueta</th><th>Color</th><th>Atajo</th><th>Tipo</th><th /></tr></thead>
+            <tbody>{rows.map((r, i) => (
+              <tr key={r.id ?? `n${i}`} data-class={r.id ?? "new"}>
+                <td><input className="c-name" type="text" maxLength={40} disabled={dis} value={r.name} onChange={(e) => set(i, { name: e.target.value })} aria-label="Nombre de la etiqueta" /></td>
+                <td><label className="colorfld"><input className="c-color" type="color" disabled={dis} value={r.color} onChange={(e) => set(i, { color: e.target.value })} aria-label="Color de la etiqueta" /><code>{r.color.toUpperCase()}</code></label></td>
+                <td><input className="c-key" type="text" maxLength={1} disabled={dis} value={r.shortcut} onChange={(e) => set(i, { shortcut: e.target.value.toUpperCase() })} aria-label="Atajo de teclado" title="Una tecla: un dígito (1–9) o una letra" /></td>
+                <td><select className="c-neg" disabled={dis} value={r.negative ? "neg" : "obj"} onChange={(e) => set(i, { negative: e.target.value === "neg" })} aria-label="Tipo de etiqueta" title="Objeto: lo que se detecta. Negativa: marca una caja como «no es» y descarta la propuesta"><option value="obj">Objeto</option><option value="neg">Negativa</option></select></td>
+                <td><button className="iconbtn3 c-del" disabled={dis || rows.length < 2} title="Quitar esta etiqueta (si ya hay cajas con ella, el servidor no lo permite)" aria-label="Quitar etiqueta" onClick={() => setRows(rows.filter((_, j) => j !== i))}><Icon name="trash" size={16} /></button></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <button className="btn-outline add" id="cfg-add" disabled={dis || rows.length >= 12} onClick={() => setRows([...rows, { name: "", color: NEW_COLORS[rows.length % NEW_COLORS.length], shortcut: "", negative: false }])}><Icon name="plus" size={16} /> Añadir etiqueta</button>
+          <p className="note"><Icon name="info" size={15} /> Los nombres y colores se muestran en el editor. La clase negativa descarta propuestas.</p>
+          <p className="note warnt"><Icon name="alert" size={15} /> Las etiquetas en uso conservarán su identificador al cambiar de nombre.</p>
+        </section>
+        <section className="card">
+          <h2><span>Vista previa</span></h2>
+          <div className="chips">{rows.filter((r) => r.name.trim()).map((r, i) => <span key={i} className="chip2" style={{ background: r.color + "26", color: "#152342" }}><i className="dot" style={{ background: r.color }} />{r.name}{r.shortcut && <kbd>{r.shortcut}</kbd>}</span>)}</div>
+        </section>
+      </div>
+      <div className={"savebar" + (dirty ? " dirty" : "")} id="cfg-bar">
+        <span className={msg ? (msg.ok ? "okmsg" : "err") : dirty ? "warnt" : "mut"} id="cfg-msg">{msg ? msg.t : dirty ? "Cambios sin guardar" : "Sin cambios"}</span>
+        <span className="grow" />
+        <button className="btn-outline" id="cfg-cancel" disabled={!dirty || save.isPending} onClick={() => { reset(); setMsg(null); }}>Cancelar</button>
+        <button className="primary" id="cfg-save" disabled={dis || !dirty || bad || save.isPending} onClick={() => save.mutate()}>Guardar cambios</button>
+      </div>
+    </div>
+  );
+}
+
 function Team({ project, isAdmin, me }: { project: Project; isAdmin: boolean; me: string }) {
   const qc = useQueryClient();
   const team = useQuery({ queryKey: ["team", project.id], queryFn: () => api.team(project.id), enabled: isAdmin });
@@ -415,8 +553,10 @@ function Team({ project, isAdmin, me }: { project: Project; isAdmin: boolean; me
   const reset = useMutation({ mutationFn: (u: string) => api.resetPassword(project.id, u, pw[u] ?? ""), onSuccess: (_d, u) => { ok(`Contraseña de «${u}» cambiada.`); setPw({ ...pw, [u]: "" }); }, onError: fail });
   if (!isAdmin) return <div className="panel"><p className="mut">Solo un administrador puede gestionar el equipo.</p></div>;
   return (
-    <div className="panel" id="team">
-      <h2>Equipo del proyecto</h2>
+    <div className="grid2 team-grid" id="team">
+     <div className="stack">
+      <div className="card">
+      <h2><span>Miembros</span></h2>
       {msg && <p className={msg.ok ? "okmsg" : "err"} id="team-msg">{msg.t}</p>}
       <table className="tbl" id="team-list">
         <thead><tr><th>Usuario</th><th>Rol</th><th>Nueva contraseña</th><th /></tr></thead>
@@ -430,15 +570,27 @@ function Team({ project, isAdmin, me }: { project: Project; isAdmin: boolean; me
           </tr>
         ))}</tbody>
       </table>
-      <h2>Añadir persona</h2>
-      <p className="mut">Si el usuario no existe se crea con la contraseña inicial (que debería cambiar al entrar). Si ya existe, solo se le da acceso a este proyecto.</p>
+      </div>
+      <div className="card">
+      <h2><span>Añadir persona<small>Si el usuario no existe se crea con la contraseña inicial (que debería cambiar al entrar). Si ya existe, solo se le da acceso a este proyecto.</small></span></h2>
       <div className="formrow">
         <input title="Nombre de usuario (2 a 64 caracteres: letras, números, punto, guion o guion bajo)" type="text" id="tm-user" placeholder="usuario" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
         <input title="Nombre para mostrar (opcional)" type="text" id="tm-name" placeholder="nombre (opcional)" value={f.display_name} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
         <input title="Contraseña inicial, obligatoria si el usuario no existe (mínimo 8 caracteres). Si ya existe, déjala vacía" type="password" id="tm-pass" placeholder="contraseña inicial" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
         <select title="Rol: administrador (todo), revisor (decide etiquetas finales y opera), etiquetador (etiqueta) o lector (solo mira)" id="tm-role" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{Object.entries(ROLE_TEXT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-        <button title="Da acceso al proyecto; si el usuario no existe lo crea" className="primary" id="tm-add" disabled={!f.username || add.isPending} onClick={() => add.mutate()}>Añadir</button>
+        <button title="Da acceso al proyecto; si el usuario no existe lo crea" className="primary" id="tm-add" disabled={!f.username || add.isPending} onClick={() => add.mutate()}>Añadir al proyecto</button>
       </div>
+      </div>
+     </div>
+     <aside className="card how">
+      <h2><span>Roles del proyecto</span></h2>
+      <ol className="roles">
+        <li><div><strong>Administrador</strong><span>Gestiona el proyecto, sus miembros y la configuración.</span></div></li>
+        <li><div><strong>Revisor</strong><span>Compara anotaciones y decide versiones finales.</span></div></li>
+        <li><div><strong>Etiquetador</strong><span>Anota y revisa sus imágenes.</span></div></li>
+        <li><div><strong>Lector</strong><span>Consulta el proyecto sin editar.</span></div></li>
+      </ol>
+     </aside>
     </div>
   );
 }
@@ -454,35 +606,54 @@ function System({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
   const chg = useMutation({ mutationFn: () => api.changePassword(pw.old, pw.nw), onSuccess: () => { setMsg({ t: "Tu contraseña se cambió.", ok: true }); setPw({ old: "", nw: "" }); }, onError: (e) => setMsg({ t: (e as Error).message, ok: false }) });
   const u = usage.data;
   return (
-    <div className="panel" id="system">
+    <div className="stack" id="system">
       {msg && <p className={msg.ok ? "okmsg" : "err"} id="sys-msg">{msg.t}</p>}
       {isAdmin && (<>
-        <h2>Uso de disco</h2>
-        {u && (
-          <table className="tbl" id="usage-tbl"><tbody>
-            <tr><td>Imágenes</td><td>{u.images.files}</td><td>{mb(u.images.bytes)}</td></tr>
-            <tr><td>Videos originales (externos)</td><td>{u.videos.files}</td><td>{mb(u.videos.bytes)}</td></tr>
-            <tr><td>Modelos</td><td /><td>{mb(u.models.bytes)}</td></tr>
-            <tr><td>Exportaciones</td><td /><td>{mb(u.exports.bytes)}</td></tr>
-            <tr><td><b>Cuenta para la cuota</b></td><td /><td id="usage-owned"><b>{mb(u.owned_bytes)}</b>{u.quota_bytes ? ` de ${mb(u.quota_bytes)}` : " (sin cuota)"}{u.over_quota ? " — SUPERADA" : ""}</td></tr>
-          </tbody></table>
-        )}
-        <div className="formrow"><label>Cuota (GB, vacío = sin límite) <input title="Límite de disco que puede ocupar lo que esta plataforma escribe para el proyecto (imágenes, modelos, exportaciones). Vacío: sin límite" type="text" id="sys-quota" value={quota} onChange={(e) => setQuota(e.target.value)} style={{ width: 90 }} /></label>
-          <button title="Guardar la cuota; al superarla no se aceptan imágenes nuevas" id="sys-quota-save" onClick={() => saveQuota.mutate()}>Guardar cuota</button></div>
-        <h2>Servicio</h2>
-        {sys.data && <p className="mut" id="sys-jobs">Trabajos en cola: <b>{sys.data.jobs.queued}</b> · en curso: <b>{sys.data.jobs.running}</b> · sesiones en vivo activas: <b>{sys.data.live_active}</b></p>}
-        <table className="tbl"><thead><tr><th>Cuándo</th><th>Quién</th><th>Qué</th></tr></thead>
-          <tbody>{(sys.data?.recent ?? []).map((r, i) => <tr key={i}><td>{new Date(r.at).toLocaleString()}</td><td>{r.user ?? "—"}</td><td>{r.action}{r.target ? ` · ${r.target}` : ""}</td></tr>)}</tbody></table>
-        <h2>Copia del proyecto</h2>
-        <p className="mut">Descarga todo lo etiquetado (etiquetas, revisiones, asignaciones, datasets, equipo) en un archivo. No incluye imágenes ni videos, que se referencian por ruta. Se restaura con <code>python -m app.cli restore-project</code>.</p>
-        <p><a id="sys-backup" href={api.backupUrl(project.id)} download>Descargar copia del proyecto</a></p>
+        <div className="grid2">
+          <section className="card">
+            <h2><span>Almacenamiento del proyecto</span></h2>
+            {u && <p className="bigsize">{mb(u.owned_bytes)} <span className={"pill " + (u.over_quota ? "warn" : "ok")}>{u.quota_bytes ? (u.over_quota ? "Cuota superada" : `Cuota ${mb(u.quota_bytes)}`) : "Sin límite"}</span></p>}
+            {u && (
+              <table className="tbl" id="usage-tbl"><tbody>
+                <tr><td>Imágenes · {u.images.files}</td><td className="num">{mb(u.images.bytes)}</td></tr>
+                <tr><td>Modelos</td><td className="num">{mb(u.models.bytes)}</td></tr>
+                <tr><td>Exportaciones</td><td className="num">{mb(u.exports.bytes)}</td></tr>
+                <tr><td><b>Cuenta para la cuota</b></td><td className="num" id="usage-owned"><b>{mb(u.owned_bytes)}</b>{u.quota_bytes ? ` de ${mb(u.quota_bytes)}` : " (sin cuota)"}{u.over_quota ? " — SUPERADA" : ""}</td></tr>
+              </tbody></table>
+            )}
+            {u && <div className="callout infoc"><Icon name="info" size={18} /><span><b>Videos originales externos · {u.videos.files} · {mb(u.videos.bytes)}</b><br />No cuentan para la cuota del proyecto.</span></div>}
+            <label className="fld">Cuota del proyecto (GB, vacío = sin límite)
+              <span className="inline"><input title="Límite de disco que puede ocupar lo que esta plataforma escribe para el proyecto (imágenes, modelos, exportaciones). Vacío: sin límite" type="text" id="sys-quota" placeholder="Sin límite" value={quota} onChange={(e) => setQuota(e.target.value)} />
+                <button className="btn-outline" title="Guardar la cuota; al superarla no se aceptan imágenes nuevas" id="sys-quota-save" onClick={() => saveQuota.mutate()}>Guardar cuota</button></span></label>
+          </section>
+          <section className="card">
+            <h2><span>Estado del servicio</span></h2>
+            <div className="tiles3">
+              <div><b>{sys.data?.jobs.queued ?? 0}</b><span>En cola</span></div>
+              <div><b>{sys.data?.jobs.running ?? 0}</b><span>En curso</span></div>
+              <div><b>{sys.data?.live_active ?? 0}</b><span>Sesiones en vivo</span></div>
+            </div>
+            {sys.data && <p className="mut" id="sys-jobs">Trabajos en cola: <b>{sys.data.jobs.queued}</b> · en curso: <b>{sys.data.jobs.running}</b> · sesiones en vivo activas: <b>{sys.data.live_active}</b></p>}
+            {sys.data && !sys.data.jobs.queued && !sys.data.jobs.running && <div className="callout okc"><Icon name="checkCircle" size={20} /><b>Sin trabajos activos</b></div>}
+            <h3>Copia del proyecto</h3>
+            <p className="mut">Descarga todo lo etiquetado (etiquetas, revisiones, asignaciones, datasets, equipo) en un archivo. No incluye imágenes ni videos. Se restaura con <code>python -m app.cli restore-project</code>.</p>
+            <p><a className="btn-outline linkbtn" id="sys-backup" href={api.backupUrl(project.id)} download>Descargar copia del proyecto</a></p>
+          </section>
+        </div>
+        <section className="card">
+          <h2><span>Actividad reciente</span></h2>
+          <table className="tbl"><thead><tr><th>Cuándo</th><th>Usuario</th><th>Acción</th></tr></thead>
+            <tbody>{(sys.data?.recent ?? []).map((r, i) => <tr key={i}><td>{new Date(r.at).toLocaleString()}</td><td>{r.user ?? "—"}</td><td>{r.action}{r.target ? ` · ${r.target}` : ""}</td></tr>)}</tbody></table>
+        </section>
       </>)}
-      <h2>Mi contraseña</h2>
-      <div className="formrow">
-        <input title="Tu contraseña actual" type="password" id="pw-old" placeholder="actual" value={pw.old} onChange={(e) => setPw({ ...pw, old: e.target.value })} />
-        <input title="Tu nueva contraseña (mínimo 8 caracteres)" type="password" id="pw-new" placeholder="nueva (mín. 8)" value={pw.nw} onChange={(e) => setPw({ ...pw, nw: e.target.value })} />
-        <button title="Cambiar tu contraseña" id="pw-go" disabled={!pw.old || pw.nw.length < 8} onClick={() => chg.mutate()}>Cambiar mi contraseña</button>
-      </div>
+      <section className="card">
+        <h2><span>Mi contraseña</span></h2>
+        <div className="formrow">
+          <input title="Tu contraseña actual" type="password" id="pw-old" placeholder="actual" value={pw.old} onChange={(e) => setPw({ ...pw, old: e.target.value })} />
+          <input title="Tu nueva contraseña (mínimo 8 caracteres)" type="password" id="pw-new" placeholder="nueva (mín. 8)" value={pw.nw} onChange={(e) => setPw({ ...pw, nw: e.target.value })} />
+          <button title="Cambiar tu contraseña" id="pw-go" disabled={!pw.old || pw.nw.length < 8} onClick={() => chg.mutate()}>Cambiar mi contraseña</button>
+        </div>
+      </section>
     </div>
   );
 }

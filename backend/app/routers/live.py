@@ -37,6 +37,9 @@ class ControlIn(BaseModel):
     threshold: float | None = Field(None, ge=0, le=1)
     paused: bool | None = None
     record: bool | None = None
+    show_boxes: bool | None = None
+    show_conf: bool | None = None
+    show_classes: list[int] | None = None  # índices de las clases que se dibujan; null = todas
 
 
 def _session(db: Session, user: User, sid: int, operate: bool = False) -> LiveSession:
@@ -178,7 +181,7 @@ def control(session_id: int, body: ControlIn, user: User = Depends(current_user)
     s = _session(db, user, session_id, operate=True)
     if s.status != "running" or not live.alive(s):
         raise HTTPException(409, "La sesión no está activa")
-    msg = body.model_dump(exclude_none=True)
+    msg = body.model_dump(exclude_unset=True)
     out = live.worker_control(s, msg)
     if "threshold" in msg:
         s.params = {**s.params, "threshold": out["threshold"]}

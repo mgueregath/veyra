@@ -263,3 +263,9 @@ def test_start_tolerates_warnings_before_ready_and_reports_slow_start(client, li
     monkeypatch.setattr(settings, "live_start_timeout", 1.0)
     r = start(adm, live_world)
     assert r.status_code == 502 and "cargando modelo" in r.json()["detail"]
+
+
+def test_session_token_never_looks_like_a_command_line_option():
+    """Regresión: con token_urlsafe, ~1 de cada 64 sesiones fallaba al arrancar porque el token empezaba por «-»."""
+    tokens = {live.new_token() for _ in range(3000)}
+    assert len(tokens) == 3000 and all(len(t) == 48 and not t.startswith("-") and t.isalnum() for t in tokens)

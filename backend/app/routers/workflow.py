@@ -159,15 +159,13 @@ def frame_annotations(frame_id: int, user: User = Depends(current_user), db: Ses
         .where(Annotation.frame_id == f.id)
         .order_by(Annotation.id)
     ).all()
-    names = (
-        {u.id: u.username for u in db.scalars(select(User).where(User.id.in_([a.user_id for a in anns])))}
-        if anns
-        else {}
-    )
+    users = {u.id: u for u in db.scalars(select(User).where(User.id.in_([a.user_id for a in anns])))} if anns else {}
+    names = {i: u.username for i, u in users.items()}
     return [
         UserAnnotationOut(
             user_id=a.user_id,
             user=names[a.user_id],
+            display_name=users[a.user_id].display_name,
             reviewed=a.reviewed,
             boxes=[
                 BoxOut(

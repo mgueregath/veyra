@@ -12,6 +12,7 @@ from .routers import (
     assisted,
     auth,
     datasets,
+    detect,
     evaluations,
     frames,
     models,
@@ -51,6 +52,7 @@ app.include_router(evaluations.router)
 app.include_router(models.router)
 app.include_router(assisted.router)
 app.include_router(live_router.router)
+app.include_router(detect.router)
 app.include_router(admin.router)
 
 

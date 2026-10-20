@@ -44,7 +44,8 @@ class Api:
             r = self.op.open(rq, timeout=60)
             return json.loads(r.read() or b"null")
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"{method} {path} -> {e.code} {e.read()[:200]!r}") from None
+            detail = e.read()[:1500].decode("utf-8", "replace")
+            raise RuntimeError(f"{method} {path} -> {e.code} {detail}") from None
 
     def get(self, path):
         return self.call("GET", path)

@@ -25,6 +25,8 @@ export interface PlayerUi {
   rate: number;
   loop: boolean;
   win: string;
+  startLabel: string;
+  endLabel: string;
   markPct: number;
   seek: number;
   now: string;
@@ -364,6 +366,8 @@ export class VideoPlayer {
       open: this.open, view: this.view, ready: this.ready, at: this.at, playing: this.view === "video" && !v.paused,
       boxes: this.boxes, rate: this.rate, loop: this.loop,
       win: can ? `ventana ${fmtT(this.start)} – ${fmtT(this.end)} · foto en ${fmtT(this.t)}` : "",
+      startLabel: can ? fmtT(this.start) : "—",
+      endLabel: can ? fmtT(this.end) : "—",
       markPct: can ? (100 * (this.t - this.start)) / (this.end - this.start) : 0,
       seek, now, rel, chip, chipOk, msg: this.msg, saving: this.saving,
     };

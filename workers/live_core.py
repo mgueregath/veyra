@@ -228,7 +228,7 @@ class Stats:
 PALETTE = [(80, 185, 63), (255, 140, 179), (73, 81, 248), (35, 167, 227), (240, 201, 76)]  # BGR
 
 
-def draw_overlay(frame: np.ndarray, tracks, names: list[str], banner: str = "") -> np.ndarray:
+def draw_overlay(frame: np.ndarray, tracks, names: list[str], banner: str = "", show_conf: bool = True) -> np.ndarray:
     """Dibuja cajas, clase, puntaje e id sobre una COPIA del fotograma."""
     out = frame.copy()
     th = max(2, round(out.shape[1] / 600))
@@ -236,7 +236,9 @@ def draw_overlay(frame: np.ndarray, tracks, names: list[str], banner: str = "") 
         x, y, w, h = (int(round(v)) for v in t.box)
         col = PALETTE[t.cls % len(PALETTE)]
         cv2.rectangle(out, (x, y), (x + w, y + h), col, th)
-        label = f"{names[t.cls] if t.cls < len(names) else t.cls} {t.score:.2f} #{t.id}"
+        label = (
+            f"{names[t.cls] if t.cls < len(names) else t.cls}" + (f" {t.score:.2f}" if show_conf else "") + f" #{t.id}"
+        )
         (tw, tH), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
         cv2.rectangle(out, (x, max(0, y - tH - 8)), (x + tw + 6, y), col, -1)
         cv2.putText(out, label, (x + 3, max(tH, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1, cv2.LINE_AA)

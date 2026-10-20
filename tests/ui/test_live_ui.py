@@ -13,7 +13,8 @@ import time
 from harness import ROOT, Env, set_input, wait_for
 
 env = Env("liveui")
-os.environ.update(LABELHUB_LIVE_DETECTOR="fake", LABELHUB_LIVE_PYTHON=sys.executable, LABELHUB_RUNS_ROOT=str(env.data / "runs"))
+os.environ.update(LABELHUB_LIVE_DETECTOR="fake", LABELHUB_LIVE_PYTHON=sys.executable, LABELHUB_RUNS_ROOT=str(env.data / "runs"),
+                  LABELHUB_TRAIN_PYTHON=sys.executable, LABELHUB_PREDICT_SCRIPT=str(ROOT / "backend" / "tests" / "fake_predict.py"))
 res = {}
 
 
@@ -64,10 +65,12 @@ try:
     check("el editor tiene el botón «Modelos» (ya no «En vivo»)", c.eval("!document.getElementById('livebtn')"))
     c.eval("document.getElementById('modelsbtn').click()")
     check("«Modelos» abre la lista de modelos entrenados con el primero ya elegido", wait_for(c, "document.querySelectorAll('#model-list [data-model]').length===1&&!!document.getElementById('model-stats')"))
-    check("se ven los indicadores del entrenamiento del modelo (mAP50, mAP50-95, precisión, recall)", wait_for(c, "document.getElementById('model-train-stats').textContent.includes('50.0 %')&&document.getElementById('model-train-stats').textContent.includes('70.0 %')"), c.eval("document.getElementById('model-train-stats')?.textContent"))
-    check("se ven sus evaluaciones (mAP, precisión, recall, F1, umbral, error de conteo) y el detalle por clase", wait_for(c, "!!document.getElementById('model-evals')&&document.querySelectorAll('#model-evals tbody tr').length===1&&document.getElementById('model-evals').textContent.includes('42.0 %')&&document.getElementById('model-perclass').textContent.includes('louse')"), c.eval("document.getElementById('model-evals')?.textContent"))
-    check("el formulario permite correr el modelo sobre un video grabado o una cámara en vivo", wait_for(c, "!!document.getElementById('lv-start')&&document.getElementById('lv-video').options.length===1&&[...document.getElementById('lv-kind').options].map(o=>o.value).join()==='video,url'"))
-    check("la página no pide elegir modelo en el formulario (ya está elegido en la lista)", c.eval("!document.getElementById('lv-model')"))
+    check("se ven los indicadores del entrenamiento del modelo (mAP50, mAP50-95, precisión, recall)", wait_for(c, "document.getElementById('model-train-stats').textContent.includes('50,0 %')&&document.getElementById('model-train-stats').textContent.includes('70,0 %')"), c.eval("document.getElementById('model-train-stats')?.textContent"))
+    check("se ven sus evaluaciones (mAP, precisión, recall, F1, umbral, error de conteo) y el detalle por clase", wait_for(c, "!!document.getElementById('model-evals')&&document.querySelectorAll('#model-evals tbody tr').length===1&&document.getElementById('model-evals').textContent.includes('42,0 %')&&document.getElementById('model-perclass').textContent.includes('louse')"), c.eval("document.getElementById('model-evals')?.textContent"))
+    check("el detalle del modelo ofrece «Ejecutar modelo», que abre una pantalla propia (no hay formulario en la lista)", wait_for(c, "!!document.getElementById('run-model')") and c.eval("!document.getElementById('lv-start')"))
+    c.eval("document.getElementById('run-model').click()")
+    check("la pantalla de ejecución permite elegir video, cámara o imágenes", wait_for(c, "!!document.getElementById('lv-start')&&document.getElementById('lv-video').options.length===1&&['lv-kind-video','lv-kind-url','lv-kind-images'].every(i=>!!document.getElementById(i))") and "run" in c.eval("location.hash"), c.eval("location.hash"))
+    check("el modelo ya viene elegido en la configuración", c.eval("document.getElementById('lv-model').selectedOptions[0].textContent") == "demo")
     c.eval("window.__errs=[];window.addEventListener('error',e=>__errs.push(String(e.message)+' '+((e.error&&e.error.stack)||'').slice(0,400)));const ce=console.error;console.error=(...a)=>{__errs.push(a.map(x=>(x&&x.stack)||String(x)).join(' ').slice(0,600));ce(...a)}")
     c.eval("document.getElementById('lv-start').click()")
     ok_start = wait_for(c, "!!document.querySelector('#live-list .lvitem .lv-running')", 30)
@@ -83,6 +86,16 @@ try:
     check("Pausar detiene el procesamiento y el botón pasa a «Reanudar»", wait_for(c, "document.getElementById('lc-pause').textContent.includes('Reanudar')") and root.get(f"/api/live/{sid}")["stats"]["paused"])
     c.eval("document.getElementById('lc-pause').click()")
     check("Reanudar lo vuelve a activar", wait_for(c, "document.getElementById('lc-pause').textContent.includes('Pausar')"))
+    # visualización en vivo: la dibuja el proceso, por eso se le pide por control
+    c.eval("document.getElementById('vz-boxes').click()")
+    check("«Mostrar cajas» y «Mostrar confianza» se aplican en el proceso en vivo", wait_for(c, "!document.getElementById('vz-boxes').checked") and root.get(f"/api/live/{sid}")["stats"]["show_boxes"] is False)
+    c.eval("document.getElementById('vz-boxes').click()"); c.eval("document.getElementById('vz-conf').click()"); time.sleep(0.8)
+    check("apagar la confianza no apaga las cajas", root.get(f"/api/live/{sid}")["stats"]["show_boxes"] is True and root.get(f"/api/live/{sid}")["stats"]["show_conf"] is False)
+    c.eval("document.getElementById('vz-conf').click()")
+    c.eval("document.querySelector('#vz-classes button').click()")
+    check("ocultar una clase se aplica en el proceso (muestra solo la otra)", wait_for(c, "document.querySelector('#vz-classes button').getAttribute('aria-pressed')==='false'") and root.get(f"/api/live/{sid}")["stats"]["show_classes"] == [1], root.get(f"/api/live/{sid}")["stats"].get("show_classes"))
+    c.eval("document.querySelector('#vz-classes button').click()"); time.sleep(0.8)
+    check("volver a mostrar todas las clases deja «todas» (null)", root.get(f"/api/live/{sid}")["stats"]["show_classes"] is None)
     # grabar un clip
     c.eval("document.getElementById('lc-rec').click()")
     check("Grabar clip: el botón cambia a «Detener grabación»", wait_for(c, "document.getElementById('lc-rec').textContent.includes('Detener')"))
@@ -101,7 +114,7 @@ try:
     check("Detener sesión: queda «detenida» y se corta el flujo", wait_for(c, "!!document.getElementById('live-ended')&&!document.getElementById('live-img')"))
     check("al detener quedan las estadísticas finales guardadas", (root.get(f"/api/live/{sid}")["summary"] or {}).get("frames", 0) > 0)
     # URL peligrosa
-    set_input(c, "lv-kind", "url", "change", "HTMLSelectElement"); time.sleep(0.3)
+    c.eval("document.getElementById('lv-kind-url').click()"); time.sleep(0.3)
     set_input(c, "lv-url", "file:///etc/passwd", "input"); time.sleep(0.2)
     c.eval("document.getElementById('lv-start').click()")
     check("una URL peligrosa (file://) se rechaza con un aviso claro", wait_for(c, "!!document.getElementById('live-msg')&&document.getElementById('live-msg').textContent.includes('rtsp://')"), c.eval("document.getElementById('live-msg')?.textContent"))
@@ -113,6 +126,23 @@ try:
     check("la contraseña de la cámara NO se muestra en pantalla", "secreto" not in shown and "usuario:****@" in shown, shown[:200])
     cam = [s for s in root.get(f"/api/projects/{PID}/live") if s["source_kind"] == "url"][0]
     root.call("DELETE", f"/api/live/{cam['id']}")
+    # imágenes: una sola, un conjunto del proyecto y subidas
+    wait_for(c, "!document.getElementById('lc-stop')", 10)   # la sesión de la cámara se detuvo por API; la pantalla se entera en unos segundos
+    c.eval("document.getElementById('lv-kind-images').click()"); time.sleep(0.3)
+    check("con «Imágenes» el botón pasa a «Detectar» y hay opciones del proyecto o subir", c.eval("document.getElementById('lv-start').textContent.includes('Detectar')&&!!document.getElementById('im-first')&&!!document.getElementById('im-upload')"))
+    c.eval("document.getElementById('lv-start').click()")
+    check("detectar una imagen del proyecto muestra la imagen con cajas (el umbral 0,25 oculta la de 0,2)", wait_for(c, "!!document.querySelector('#img-view img')&&document.querySelectorAll('#img-view .det').length===1&&document.querySelectorAll('#img-dets tbody tr').length===1", 30), c.eval("document.getElementById('img-dets')?.textContent"))
+    set_input(c, "lc-thr", "0.1", "input"); time.sleep(0.4)
+    check("bajar el umbral muestra también la detección débil, sin volver a correr el modelo", c.eval("document.querySelectorAll('#img-view .det').length") == 2)
+    c.eval("document.getElementById('vz-boxes').click()"); time.sleep(0.3)
+    check("«Mostrar cajas» apagado oculta las cajas", c.eval("document.querySelectorAll('#img-view .det').length") == 0)
+    c.eval("document.getElementById('vz-boxes').click()"); time.sleep(0.3)
+    c.eval("document.querySelector('#vz-classes button').click()"); time.sleep(0.3)
+    check("ocultar una clase quita sus cajas", c.eval("document.querySelectorAll('#img-view .det').length") == 0 and c.eval("document.querySelector('#vz-classes button').getAttribute('aria-pressed')") == "false")
+    c.eval("document.querySelector('#vz-classes button').click()")
+    c.eval("document.getElementById('im-upload').click()"); time.sleep(0.3)
+    check("«Subir» pide archivos y no deja detectar sin elegir ninguno", c.eval("!!document.getElementById('im-files')&&document.getElementById('lv-start').disabled"))
+
     # sesión viva para el lector
     run = root.call("POST", f"/api/projects/{PID}/live", {"source_kind": "video", "video_id": root.get(f"/api/projects/{PID}/videos")[0]["id"], "model_id": MID, "threshold": 0.25, "imgsz": 640, "no_realtime": True})
     wait_for(c, "true")
@@ -120,6 +150,8 @@ try:
     shutil.rmtree(c.prof, ignore_errors=True)
     c2 = env.browser("lector")
     c2.eval(f"location.hash='p={PID}&v=models'")
+    check("un lector ve «Ver ejecuciones» (hay una sesión activa) y no «Ejecutar modelo»", wait_for(c2, "!!document.getElementById('run-model')&&document.getElementById('run-model').textContent.includes('Ver ejecuciones')"))
+    c2.eval(f"location.hash='p={PID}&v=run&m={MID}'")
     check("un lector ve la sesión y el video, pero no el formulario ni los controles", wait_for(c2, "!!document.getElementById('live-img')&&document.getElementById('live-img').naturalWidth>0", 25) and c2.eval("!document.getElementById('live-form')") and c2.eval("document.getElementById('lc-save').disabled&&document.getElementById('lc-pause').disabled&&document.getElementById('lc-stop').disabled&&document.getElementById('lc-thr').disabled"))
     root.call("DELETE", f"/api/live/{run['id']}")
     print("\nRESUMEN: %d/%d OK" % (sum(res.values()), len(res)))

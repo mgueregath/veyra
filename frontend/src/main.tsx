@@ -3,6 +3,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
+import "./theme2.css";
+import "./theme3.css";
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 createRoot(document.getElementById("root")!).render(

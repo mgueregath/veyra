@@ -27,6 +27,7 @@ export interface EditorUi {
   rev: number; // sube con cada cambio del documento
   sel: number;
   drawMode: boolean;
+  tool: "select" | "pan";
   activeClass: string;
   zoomPct: number;
   deletedCount: number;
@@ -45,7 +46,7 @@ type Drag =
 
 const NO_LABEL = "#e3b341";
 /** Margen (px) que deja el ajuste alrededor de la imagen: el área de la foto respira y nada queda pegado al borde. */
-export const FIT_PAD = 24;
+export const FIT_PAD = 30;
 
 export class BoxEditor {
   doc: M.EditDoc | null = null;
@@ -54,6 +55,8 @@ export class BoxEditor {
   sel = -1;
   hov = -1;
   drawMode = false;
+  /** «select»: editar cajas (y mover la imagen arrastrando en vacío). «pan»: arrastrar siempre mueve la imagen. */
+  tool: "select" | "pan" = "select";
   activeClass: string;
   cssW = 1;
   cssH = 1;
@@ -161,7 +164,14 @@ export class BoxEditor {
     this.draw();
   }
   setActiveClass(id: string) { this.activeClass = id; this.emit(); }
+  setTool(t: "select" | "pan") {
+    this.tool = t;
+    if (t === "pan") { this.drawMode = false; this.sel = -1; }
+    this.o.canvas.style.cursor = "grab";
+    this.draw();
+  }
   setDrawMode(on: boolean) {
+    if (on) this.tool = "select";
     this.drawMode = on;
     this.o.canvas.style.cursor = on ? "crosshair" : "grab";
     this.draw();
@@ -257,6 +267,7 @@ export class BoxEditor {
       rev: this.rev,
       sel: this.sel,
       drawMode: this.drawMode,
+      tool: this.tool,
       activeClass: this.activeClass,
       zoomPct: Math.round(this.view.s * 100),
       deletedCount: doc?.deleted.length ?? 0,
@@ -269,7 +280,7 @@ export class BoxEditor {
   }
   private emit() {
     const u = this.buildUi();
-    const sig = JSON.stringify([u.rev, u.sel, u.drawMode, u.activeClass, u.zoomPct, u.deletedCount, u.anchor?.map(Math.round), u.undo, Math.round(u.cssW), Math.round(u.cssH)]);
+    const sig = JSON.stringify([u.rev, u.sel, u.drawMode, u.tool, u.activeClass, u.zoomPct, u.deletedCount, u.anchor?.map(Math.round), u.undo, Math.round(u.cssW), Math.round(u.cssH)]);
     if (sig !== this.sig) { this.sig = sig; this.ui = u; this.o.onUi(); }
   }
 
@@ -282,6 +293,7 @@ export class BoxEditor {
   private onHover(e: MouseEvent) {
     if (this.drag || !this.doc) return;
     if (this.o.canvas.width !== canvasBitmapSize(this.cssW, this.cssH, this.dpr())[0]) this.resize();
+    if (this.tool === "pan" && !this.drawMode) { this.o.canvas.style.cursor = "grab"; return; }
     const [px, py] = this.pos(e), bx = this.boxes();
     const h = handleAt(this.view, bx, this.sel, px, py), over = boxAt(this.view, bx, px, py);
     this.o.canvas.style.cursor = cursorFor(h, over >= 0, this.drawMode);
@@ -291,7 +303,7 @@ export class BoxEditor {
   private onDown(e: MouseEvent) {
     if (!this.doc) return;
     const [px, py] = this.pos(e);
-    if (e.button === 2 || e.shiftKey) { this.drag = { mode: "pan", px, py, vx: this.view.x, vy: this.view.y, moved: false, empty: false }; return; }
+    if (e.button === 2 || e.shiftKey || (this.tool === "pan" && !this.drawMode)) { this.drag = { mode: "pan", px, py, vx: this.view.x, vy: this.view.y, moved: false, empty: false }; return; }
     if (this.drawMode) { // con B armado se dibuja, aunque el clic caiga sobre otra caja
       const [x, y] = toImage(this.view, px, py);
       this.drag = { mode: "box", x0: x, y0: y, x1: x, y1: y };

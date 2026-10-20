@@ -13,15 +13,11 @@ from .evaluation import Pred
 from .models import Frame, Model, Project
 
 
-def model_predictions(db: Session, project: Project, model_id: int, frame_ids: list[int]) -> dict[int, list[Pred]]:
-    m = db.get(Model, model_id)
-    if not m or m.project_id != project.id:
-        raise ValueError(f"el modelo {model_id} no existe en este proyecto")
-    media = Path(settings.media_root).resolve()
-    frames = {f.id: str(media / f.image_path) for f in db.scalars(select(Frame).where(Frame.id.in_(frame_ids)))}
+def predict_paths(m: Model, paths: list[str]) -> dict[str, list[Pred]]:
+    """Corre el modelo sobre archivos de imagen (en un proceso aparte) y devuelve sus cajas por ruta."""
     with tempfile.TemporaryDirectory() as tmp:
         lst, out = Path(tmp) / "images.json", Path(tmp) / "pred.json"
-        lst.write_text(json.dumps(list(frames.values())))
+        lst.write_text(json.dumps(paths))
         cmd = [
             settings.train_python,
             str(settings.predict_script),
@@ -42,10 +38,20 @@ def model_predictions(db: Session, project: Project, model_id: int, frame_ids: l
         raw = json.loads(out.read_text())
     cls = m.classes
     return {
-        fid: [
+        path: [
             Pred((round(x), round(y), round(w), round(h)), cls[k], s)
             for x, y, w, h, s, k in raw.get(path, [])
             if k < len(cls)
         ]
-        for fid, path in frames.items()
+        for path in paths
     }
+
+
+def model_predictions(db: Session, project: Project, model_id: int, frame_ids: list[int]) -> dict[int, list[Pred]]:
+    m = db.get(Model, model_id)
+    if not m or m.project_id != project.id:
+        raise ValueError(f"el modelo {model_id} no existe en este proyecto")
+    media = Path(settings.media_root).resolve()
+    frames = {f.id: str(media / f.image_path) for f in db.scalars(select(Frame).where(Frame.id.in_(frame_ids)))}
+    by_path = predict_paths(m, list(frames.values()))
+    return {fid: by_path[path] for fid, path in frames.items()}

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api, type Project } from "./api/client";
 import AdminPage from "./pages/AdminPage";
 import ModelsPage from "./pages/ModelsPage";
-import UserMenu from "./components/UserMenu";
+import RunPage from "./pages/RunPage";
 import LabelPage from "./pages/LabelPage";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
@@ -13,9 +13,14 @@ const hashProject = () => {
   const m = /(?:^|[#&])p=(\d+)/.exec(window.location.hash);
   return m ? Number(m[1]) : null;
 };
-const hashView = (): "label" | "admin" | "models" => {
-  const m = /(?:^|[#&])v=(admin|models)/.exec(window.location.hash);
-  return m ? (m[1] as "admin" | "models") : "label";
+type View = "label" | "admin" | "models" | "run";
+const hashView = (): View => {
+  const m = /(?:^|[#&])v=(admin|models|run)/.exec(window.location.hash);
+  return m ? (m[1] as View) : "label";
+};
+const hashModel = () => {
+  const m = /(?:^|[#&])m=(\d+)/.exec(window.location.hash);
+  return m ? Number(m[1]) : null;
 };
 
 export default function App() {
@@ -24,12 +29,16 @@ export default function App() {
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects, enabled: !!me.data });
   const [pid, setPid] = useState<number | null>(hashProject);
   const [view, setView] = useState(hashView);
+  const [mid, setMid] = useState(hashModel);
   useEffect(() => {
-    const on = () => { setPid(hashProject()); setView(hashView()); };
+    const on = () => { setPid(hashProject()); setView(hashView()); setMid(hashModel()); };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
-  const open = (p: Project | null, v: "label" | "admin" | "models" = "label") => { window.location.hash = p ? `p=${p.id}${v === "label" ? "" : `&v=${v}`}` : ""; setPid(p ? p.id : null); setView(v); };
+  const open = (p: Project | null, v: View = "label", model: number | null = null) => {
+    window.location.hash = p ? `p=${p.id}${v === "label" ? "" : `&v=${v}`}${v === "run" && model ? `&m=${model}` : ""}` : "";
+    setPid(p ? p.id : null); setView(v); setMid(model);
+  };
 
   if (me.isLoading) return <div className="center">Cargando…</div>;
   if (!me.data) return <Login onDone={() => qc.invalidateQueries({ queryKey: ["me"] })} />;
@@ -42,17 +51,9 @@ export default function App() {
   const who = me.data.display_name ?? me.data.username;
   const project = pid !== null ? projects.data?.find((p) => p.id === pid) ?? null : null;
   if (pid !== null && projects.isLoading) return <div className="center">Cargando…</div>;
-  if (project && view === "models") return <ModelsPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onLogout={logout} />;
-  if (project && view === "admin") return <AdminPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onLogout={logout} />;
+  if (project && view === "models") return <ModelsPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onRun={(m) => open(project, "run", m)} onLogout={logout} />;
+  if (project && view === "run" && mid !== null) return <RunPage key={`${project.id}-${mid}`} project={project} user={who} modelId={mid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} onPickModel={(m) => open(project, "run", m)} onLogout={logout} />;
+  if (project && view === "admin") return <AdminPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onModels={() => open(project, "models")} onLogout={logout} />;
   if (project) return <LabelPage key={project.id} project={project} user={who} onExit={() => open(null)} onLogout={logout} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} />;
-  return (
-    <div className="page">
-      <header className="pagehead">
-        <b>LabelHub</b>
-        <span className="grow" />
-        <UserMenu user={who} onLogout={logout} />
-      </header>
-      <Projects onOpen={(p) => open(p)} />
-    </div>
-  );
+  return <Projects user={who} onOpen={(p, v) => open(p, v ?? "label")} onLogout={logout} />;
 }

@@ -40,8 +40,22 @@ class Shared:
         self.paused = False
         self.recording = False
         self.record_path = ""
+        self.show_boxes = True
+        self.show_conf = True
+        self.show_classes: set[int] | None = None  # None = todas
         self.stats: dict = {"frames": 0, "fps": 0.0, "latency_ms": 0.0}
         self.stop = threading.Event()
+
+
+def _view(sh: Shared) -> dict:
+    return {
+        "threshold": sh.threshold,
+        "paused": sh.paused,
+        "recording": sh.recording,
+        "show_boxes": sh.show_boxes,
+        "show_conf": sh.show_conf,
+        "show_classes": None if sh.show_classes is None else sorted(sh.show_classes),
+    }
 
 
 def make_handler(sh: Shared, token: str):
@@ -120,7 +134,13 @@ def make_handler(sh: Shared, token: str):
                 sh.paused = bool(body["paused"])
             if "record" in body:
                 sh.recording = bool(body["record"])
-            self._json({"threshold": sh.threshold, "paused": sh.paused, "recording": sh.recording})
+            if "show_boxes" in body:
+                sh.show_boxes = bool(body["show_boxes"])
+            if "show_conf" in body:
+                sh.show_conf = bool(body["show_conf"])
+            if "show_classes" in body:
+                sh.show_classes = None if body["show_classes"] is None else {int(k) for k in body["show_classes"]}
+            self._json(_view(sh))
 
     return H
 
@@ -178,8 +198,10 @@ def main():
             dets = [d for d in det(frame) if d[4] >= sh.threshold]
             tracks = tracker.update(dets)
             stats.add(ts)
-            banner = f"{stats.fps:4.1f} fps · {stats.latency_ms:4.0f} ms · umbral {sh.threshold:.2f} · únicos {sum(tracker.totals.values())}"
-            shown = draw_overlay(frame, tracks, names, banner)
+            vis = [t for t in tracks if sh.show_boxes and (sh.show_classes is None or t.cls in sh.show_classes)]
+            shown = draw_overlay(
+                frame, vis, names, "", sh.show_conf
+            )  # velocidad y latencia se muestran fuera del video
             if (
                 a.stream_width and shown.shape[1] > a.stream_width
             ):  # el flujo para el navegador va reducido: codificar 1080p es lo que más cuesta
@@ -245,6 +267,9 @@ def _source_stats(reader, tracker, sh):
         "threshold": sh.threshold,
         "paused": sh.paused,
         "recording": sh.recording,
+        "show_boxes": sh.show_boxes,
+        "show_conf": sh.show_conf,
+        "show_classes": None if sh.show_classes is None else sorted(sh.show_classes),
         "record_path": sh.record_path,
         "totals": {sh.names[k] if k < len(sh.names) else str(k): v for k, v in tracker.totals.items()},
         "active": len([t for t in tracker.tracks if t.confirmed and t.misses == 0]),

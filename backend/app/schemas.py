@@ -21,6 +21,7 @@ class ProjectOut(BaseModel):
     config: dict
     n_frames: int = 0
     n_reviewed: int = 0
+    cover_frame_id: int | None = None
 
 
 class BoxIn(BaseModel):
@@ -106,6 +107,7 @@ class ReviewIn(BaseModel):
 class UserAnnotationOut(BaseModel):
     user_id: int
     user: str
+    display_name: str | None = None
     reviewed: bool
     boxes: list[BoxOut]
 
@@ -132,3 +134,23 @@ class DatasetIn(BaseModel):
 
 class ExportIn(BaseModel):
     format: str = Field("yolo", pattern="^(yolo|coco|both)$")
+
+
+class ClassIn(BaseModel):
+    id: str | None = None  # las clases que ya existen conservan su id al cambiar de nombre
+    name: str = Field(min_length=1, max_length=40)
+    key: str | None = Field(None, max_length=1)
+    digit: str | None = Field(None, pattern=r"^[1-9]$")
+    color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    negative: bool = False
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=1000)
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    description: str | None = Field(None, max_length=1000)
+    classes: list[ClassIn] | None = None

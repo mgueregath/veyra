@@ -47,6 +47,11 @@ def mask_source(src: str, kind: str) -> str:
     return src
 
 
+def new_token() -> str:
+    """Token de la sesión, en hexadecimal: un base64 puede empezar por «-» y argparse lo tomaría por una opción."""
+    return secrets.token_hex(24)
+
+
 def _free_port() -> int:
     with socket.socket() as k:
         k.bind(("127.0.0.1", 0))
@@ -59,7 +64,7 @@ def active_count() -> int:
 
 def start_worker(sess: LiveSession, weights: str | None, classes: list[str], record_dir: Path) -> None:
     """Lanza el proceso y espera a que esté listo (cargar el modelo tarda). Lanza RuntimeError si no arranca."""
-    port, token = _free_port(), secrets.token_urlsafe(24)
+    port, token = _free_port(), new_token()
     prm = sess.params
     detector = settings.live_detector or ("yolo" if weights else "none")
     cmd = [
