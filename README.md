@@ -1,4 +1,6 @@
-# LabelHub
+# Veyra
+
+> Antes «LabelHub». El nombre del repositorio y las variables `LABELHUB_*` se mantienen por compatibilidad.
 
 Plataforma multiusuario, organizada por proyectos, para **etiquetar** imágenes de video con cajas, construir **datasets
 versionados**, **entrenar y evaluar** detectores, y verlos funcionar **en vivo** (video grabado, RTSP o MJPEG).

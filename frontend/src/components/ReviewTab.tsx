@@ -64,7 +64,7 @@ export default function ReviewTab({ frame, classes, editor, pid, onChanged, onVi
         </div>
       ))}
       {shown !== null && users.find((u) => u.user_id === shown) && (
-        <div className="viewing" id="rv-viewing" title="Estás viendo sobre la imagen las cajas de esta persona"><i className="dot" style={{ background: "#2563eb" }} /> Viendo cajas de {label(users.find((u) => u.user_id === shown)!)}</div>
+        <div className="viewing" id="rv-viewing" title="Estás viendo sobre la imagen las cajas de esta persona"><i className="dot" style={{ background: "#78455f" }} /> Viendo cajas de {label(users.find((u) => u.user_id === shown)!)}</div>
       )}
       <h4 className="cap">Decisión final</h4>
       {frame.review ? (

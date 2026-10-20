@@ -92,10 +92,10 @@ class Env:
             if c.eval("!!document.querySelector('form.login')"):
                 break
             time.sleep(0.1)
-        for sel, val in (("input[placeholder=Usuario]", user), ("input[type=password]", pw or "pw-" + user)):
+        for sel, val in (("form.login input[autocomplete=username]", user), ("input[type=password]", pw or "pw-" + user)):
             c.eval(f"document.querySelector('{sel}').focus()")
             c.call("Input.insertText", text=val)
-        c.eval("document.querySelector('form.login button').click()")
+        c.eval("document.querySelector('form.login button[type=submit]').click()")
         time.sleep(1.0)
         return c
 

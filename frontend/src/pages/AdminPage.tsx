@@ -70,7 +70,7 @@ function Quality({ project }: { project: Project }) {
   const collab = project.config.mode === "collab";
   const labels: Record<Status, string> = collab ? { ...STATUS_LABEL, pending: "Sin revisar", final: "Revisada (vale la última edición)" } : STATUS_LABEL;
   const keys = (Object.keys(STATUS_LABEL) as Status[]).filter((k) => !collab || k === "pending" || k === "final");
-  const bar: Record<Status, string> = { pending: "#c5cde0", single: "#0866ff", agreed: "#079447", disagreement: "#ef4444", final: "#7c3aed" };
+  const bar: Record<Status, string> = { pending: "#ded5dc", single: "#78455f", agreed: "#237653", disagreement: "#b83d52", final: "#66586e" };
   return (
     <div id="quality" className="stack">
       <div className="stats4">
@@ -208,7 +208,7 @@ function Datasets({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
         {sum !== 100 && <span className="warn">El reparto debe sumar 100 (suma {sum})</span>}
         {!isAdmin && <span className="mut">Solo un administrador puede crear versiones.</span>}
       </div>
-      <div className="distbar" aria-label="Distribución del dataset"><i style={{ flex: split[0], background: "#0866ff" }} /><i style={{ flex: split[1], background: "#22b573" }} /><i style={{ flex: split[2], background: "#fb923c" }} /></div>
+      <div className="distbar" aria-label="Distribución del dataset"><i style={{ flex: split[0], background: "#78455f" }} /><i style={{ flex: split[1], background: "#22b573" }} /><i style={{ flex: split[2], background: "#fb923c" }} /></div>
       {create.error && <p className="err" id="ds-err">{(create.error as Error).message}</p>}
       <table className="tbl" id="ds-list">
         <thead><tr><th>Versión</th><th>Imágenes</th><th>Creada</th><th /></tr></thead>
@@ -248,7 +248,7 @@ function Thumb({ ex }: { ex: EvalExample }) {
     <div className="exthumb" title={`${ex.video} · imagen ${ex.frame_id}`} style={{ width: w, height: h }}>
       <img src={api.thumbUrl(ex.frame_id)} alt="" width={w} height={h} />
       <svg viewBox={`0 0 ${ex.w} ${ex.h}`} width={w} height={h}>
-        <rect x={ex.bbox[0]} y={ex.bbox[1]} width={ex.bbox[2]} height={ex.bbox[3]} fill="none" stroke={ex.score !== undefined ? "#f85149" : "#e3b341"} strokeWidth={Math.max(3, ex.w / 250)} />
+        <rect x={ex.bbox[0]} y={ex.bbox[1]} width={ex.bbox[2]} height={ex.bbox[3]} fill="none" stroke={ex.score !== undefined ? "#b83d52" : "#e3b341"} strokeWidth={Math.max(3, ex.w / 250)} />
       </svg>
       {ex.score !== undefined && <span className="exscore">{ex.score.toFixed(1)}</span>}
     </div>
@@ -550,7 +550,7 @@ function Settings({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
         </section>
         <section className="card">
           <h2><span>Vista previa</span></h2>
-          <div className="chips">{rows.filter((r) => r.name.trim()).map((r, i) => <span key={i} className="chip2" style={{ background: r.color + "26", color: "#152342" }}><i className="dot" style={{ background: r.color }} />{r.name}{r.shortcut && <kbd>{r.shortcut}</kbd>}</span>)}</div>
+          <div className="chips">{rows.filter((r) => r.name.trim()).map((r, i) => <span key={i} className="chip2" style={{ background: r.color + "26", color: "#2b2029" }}><i className="dot" style={{ background: r.color }} />{r.name}{r.shortcut && <kbd>{r.shortcut}</kbd>}</span>)}</div>
         </section>
       </div>
       <div className={"savebar" + (dirty ? " dirty" : "")} id="cfg-bar">

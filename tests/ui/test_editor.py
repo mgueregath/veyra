@@ -201,10 +201,10 @@ try:
         if c.eval("!!document.querySelector('form.login')"):
             break
         time.sleep(0.1)
-    for sel_, val_ in (("input[placeholder=Usuario]", "tester"), ("input[type=password]", "pw")):
+    for sel_, val_ in (("form.login input[autocomplete=username]", "tester"), ("input[type=password]", "pw")):
         c.eval(f"document.querySelector('{sel_}').focus()")
         c.call("Input.insertText", text=val_)
-    c.eval("document.querySelector('form.login button').click()")
+    c.eval("document.querySelector('form.login button[type=submit]').click()")
     time.sleep(1.0)
     c.eval(f"location.hash='p={PID}'")
     install_shim()

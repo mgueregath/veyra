@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copia de seguridad de la base de LabelHub con VERIFICACIÓN: se vuelca, se restaura en una base temporal y se comparan
+# Copia de seguridad de la base de Veyra con VERIFICACIÓN: se vuelca, se restaura en una base temporal y se comparan
 # los conteos de todas las tablas. Si no coinciden, la copia se marca como inválida y el script falla.
 #   scripts/backup_db.sh [carpeta_destino] [cuántas_conservar]      (por defecto: backups/ y las últimas 14)
 set -euo pipefail

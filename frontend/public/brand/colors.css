@@ -1,0 +1,15 @@
+/* Veyra · Ciruela */
+:root {
+  --brand: #78455F;
+  --brand-hover: #60364C;
+  --text-primary: #2B2029;
+  --text-secondary: #776C75;
+  --brand-soft: #F0E6EC;
+  --background: #FAF8F6;
+  --surface: #FFFFFF;
+  --border: #DED5DC;
+  --success: #237653;
+  --warning: #98651A;
+  --error: #B83D52;
+  --info: #66586E;
+}

@@ -18,10 +18,10 @@ def wait(js, t=10):
     return False
 try:
     check("aparece el formulario de entrada", wait("!!document.querySelector('form.login')"))
-    inputs = ["input[placeholder=Usuario]", "input[type=password]"]
+    inputs = ["form.login input[autocomplete=username]", "input[type=password]"]
     for sel, val in zip(inputs, (user, pw)):
         c.eval(f"document.querySelector('{sel}').focus()"); c.call("Input.insertText", text=val)
-    c.eval("document.querySelector('form.login button').click()")
+    c.eval("document.querySelector('form.login button[type=submit]').click()")
     check("tras entrar se listan los proyectos", wait("!!document.querySelector('.card')"))
     check("el proyecto muestra 1236 imágenes", "1236" in c.eval("document.querySelector('.card').textContent"))
     c.eval("document.querySelector('.card').click()")

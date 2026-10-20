@@ -1,5 +1,6 @@
 import type { Project } from "../api/client";
 import Icon from "./Icon";
+import Logo from "./Logo";
 import UserMenu from "./UserMenu";
 
 const nb = { onMouseDown: (e: React.MouseEvent) => e.preventDefault() };
@@ -12,7 +13,7 @@ export default function TopNav({ project, user, active, onProjects, onLabel, onM
   return (
     <header id="top" className="topnav">
       <div className="tn-left">
-        <span className="logo" title="LabelHub: etiquetado, entrenamiento y detección">Label<span>Hub</span></span>
+        <Logo />
         <span className="tn-sep" />
         <nav className="crumbs" aria-label="Ruta">
           <button id="crumb-projects" className="crumb" onClick={onProjects} title="Volver a la lista de proyectos" {...nb}>Proyectos</button>

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Icon from "../components/Icon";
+import Logo from "../components/Logo";
 import UserMenu from "../components/UserMenu";
 import { api, type Project, type WorkMode } from "../api/client";
 import ModePicker from "../components/ModePicker";
@@ -22,7 +23,7 @@ export default function Projects({ user, onOpen, onLogout }: { user: string; onO
   return (
     <div className="page home">
       <header id="top" className="topnav">
-        <div className="tn-left"><span className="logo" title="LabelHub: etiquetado, entrenamiento y detección">Label<span>Hub</span></span></div>
+        <div className="tn-left"><Logo /></div>
         <div className="tn-right">
           <button className="navtab on" id="nav-projects" title="Lista de proyectos">Proyectos</button>
           <span className="tn-sep" />

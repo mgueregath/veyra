@@ -33,7 +33,7 @@ async def lifespan(_: FastAPI):
     live.stop_all()  # no dejar procesos de detección sueltos al apagar la API
 
 
-app = FastAPI(title="LabelHub", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Veyra", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
