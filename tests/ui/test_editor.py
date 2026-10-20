@@ -499,9 +499,17 @@ try:
     # ---- el fotograma de la foto, dentro del video
     c.eval("showVideoAt(P.it)"); wait(invideo + "&&P.at"); time.sleep(0.3); a = gray("poc_grab(320)")
     check('el fotograma del video en el instante de la foto es la imagen de la foto (con la rotación correcta)', mse_(a, sn) < 30 and c.eval("document.getElementById('vstat').textContent") == 'VIDEO · FOTO' and c.eval('boxAlpha()') == 1, f'MSE={mse_(a, sn):.1f}')
-    # ---- cuadros: por defecto SOLO en el instante de la foto
+    # ---- cuadros: por defecto se ven solo en la foto y medio segundo antes y después
     c.key('.'); wait("!P.at")
-    check('fuera del instante de la foto los cuadros NO se muestran (modo por defecto)', c.eval('P.boxes') == 'hide' and c.eval('boxAlpha()') == 0 and c.eval('boxesActive()') is False and c.eval("document.getElementById('vboxes').value") == 'hide')
+    check('un fotograma junto a la foto los cuadros SE VEN pero no se editan (margen de ±0,5 s)', c.eval('P.near') is True and c.eval('boxAlpha()') == 1 and c.eval('boxesActive()') is False and c.eval("document.getElementById('vboxes').value") == 'hide')
+    c.eval("showVideoAt(P.pidx(P.t-0.45))"); wait(invideo); time.sleep(0.3)
+    check('a 0,45 s antes de la foto los cuadros se ven', c.eval('Math.abs(P.pts[P.pidx(vid.currentTime)]-P.t)') <= 0.5 and c.eval('boxAlpha()') == 1, c.eval('Math.abs(P.pts[P.pidx(vid.currentTime)]-P.t)'))
+    c.eval("showVideoAt(P.pidx(P.t+0.45))"); wait(invideo); time.sleep(0.3)
+    check('a 0,45 s después de la foto los cuadros se ven', c.eval('Math.abs(P.pts[P.pidx(vid.currentTime)]-P.t)') <= 0.5 and c.eval('boxAlpha()') == 1)
+    c.eval("showVideoAt(P.pidx(P.t+0.7))"); wait(invideo); time.sleep(0.3)
+    check('a 0,7 s de la foto (fuera del margen) los cuadros NO se muestran', c.eval('P.boxes') == 'hide' and c.eval('boxAlpha()') == 0 and c.eval('boxesActive()') is False, c.eval('Math.abs(P.pts[P.pidx(vid.currentTime)]-P.t)'))
+    c.eval("showVideoAt(P.pidx(P.t-0.7))"); wait(invideo); time.sleep(0.3)
+    check('y a 0,7 s antes tampoco', c.eval('boxAlpha()') == 0)
     bb_ = st()['boxes'][0]['bbox']; xb, yb = scr(bb_[0] + bb_[2] / 2, bb_[1] + bb_[3] / 2); l_before = st()['boxes'][0]['label']; 
     c.eval("sel=-1;draw()"); c.mouse('mouseMoved', xb, yb); c.mouse('mousePressed', xb, yb); c.mouse('mouseReleased', xb, yb); time.sleep(0.2)
     check('fuera de la foto los cuadros tampoco reaccionan al ratón (no se etiquetan por error)', st()['boxes'][0]['label'] == l_before and c.eval('sel') == -1, f"{l_before} -> {st()['boxes'][0]['label']}")
@@ -511,7 +519,7 @@ try:
     c.key('o'); check('O otra vez: cuadros siempre visibles', c.eval('P.boxes') == 'full' and c.eval('boxAlpha()') == 1 and c.eval("document.getElementById('vboxes').value") == 'full')
     c.key('o'); check('O otra vez: vuelve a "solo en la foto"', c.eval('P.boxes') == 'hide' and c.eval('boxAlpha()') == 0)
     c.eval("sel=0;draw()"); n_here = c.eval('state.boxes.length'); c.key('x'); time.sleep(0.3)
-    check('fuera del instante de la foto no se puede borrar un cuadro que no se ve (y avisa)', c.eval('state.boxes.length') == n_here and 'solo se pueden editar' in c.eval("document.getElementById('vmsg').textContent"), c.eval("document.getElementById('vmsg').textContent"))
+    check('fuera del margen no se puede borrar un cuadro que no se ve (y avisa)', c.eval('state.boxes.length') == n_here and 'solo se pueden editar' in c.eval("document.getElementById('vmsg').textContent"), c.eval("document.getElementById('vmsg').textContent"))
     c.eval("sel=-1;draw();vmsg('')")
     # ---- velocidad
     c.key('Home'); wait(invideo); time.sleep(0.3)
@@ -529,8 +537,8 @@ try:
     check('a 0,5x el video avanza ~0,5 s por segundo real', 0.3 < (a1 - a0) / dtw < 0.75, f'{(a1 - a0) / dtw:.2f}x')
     set_input('vrate', '1', 'change')
     # ---- mientras reproduce, los cuadros no están
-    c.eval("vid.play()"); wait("!P.at&&boxAlpha()===0"); time.sleep(0.2)
-    check('mientras el video avanza los cuadros desaparecen', c.eval('boxAlpha()') == 0 and c.eval('vid.paused') is False)
+    c.eval("vid.play()"); wait("!P.near&&boxAlpha()===0"); time.sleep(0.2)
+    check('mientras el video avanza los cuadros aparecen en el margen de la foto y desaparecen al salir de él', c.eval('boxAlpha()') == 0 and c.eval('vid.paused') is False)
     c.eval("vid.pause()"); c.key('f')
     # ---- ocultar / mostrar controles
     c.key('p'); time.sleep(0.4); check('el teclado sigue funcionando con el menú plegado o desplazado (P reproduce)', not c.eval('vid.paused')); c.key('p')

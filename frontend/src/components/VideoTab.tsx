@@ -46,7 +46,7 @@ export default function VideoTab({ player, ui }: { player: VideoPlayer; ui: Play
         </div>
         <div className="vside right">
           <label className="mini" title="Cuándo se muestran las cajas durante el video (tecla O). Por defecto, solo en el fotograma de la imagen"><span>Mostrar cuadros</span>
-            <select id="vboxes" value={ui.boxes} onChange={(e) => { player.setBoxes(e.target.value as typeof BOX_MODES[number]); e.target.blur(); }} title="Cuándo se muestran las cajas durante el video: solo en la foto, tenues o siempre">
+            <select id="vboxes" value={ui.boxes} onChange={(e) => { player.setBoxes(e.target.value as typeof BOX_MODES[number]); e.target.blur(); }} title="Cuándo se muestran las cajas durante el video: solo medio segundo antes y después de la foto, tenues fuera de ese margen, o siempre">
               {BOX_MODES.map((m) => <option key={m} value={m}>{BOX_MODE_LABEL[m][0].toUpperCase() + BOX_MODE_LABEL[m].slice(1)}</option>)}
             </select></label>
         </div>

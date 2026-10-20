@@ -12,7 +12,9 @@ import { api, type SnapshotResult, type VideoInfo } from "../api/client";
 export const SPEEDS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 export type BoxMode = "hide" | "dim" | "full";
 export const BOX_MODES: BoxMode[] = ["hide", "dim", "full"];
-export const BOX_MODE_LABEL: Record<BoxMode, string> = { hide: "solo en la foto", dim: "tenues", full: "siempre" };
+/** Los cuadros de la imagen también se ven en el video durante este margen (en segundos) antes y después de la foto. */
+export const NEAR_S = 0.5;
+export const BOX_MODE_LABEL: Record<BoxMode, string> = { hide: "solo ±0,5 s", dim: "tenues", full: "siempre" };
 
 export interface PlayerFrame { id: number; videoId: number; hasVideo: boolean; video: string; t: number | null; w: number; h: number }
 export interface PlayerUi {
@@ -71,6 +73,7 @@ export class VideoPlayer {
   ready = false;
   vready = false;
   at = true;
+  near = true; // el fotograma que se ve está a ±NEAR_S de la foto
   boxes: BoxMode = "hide";
   rate = 1;
   loop = false;
@@ -144,9 +147,10 @@ export class VideoPlayer {
     const [w, h] = this.h.imageSize(), v = this.vid;
     return this.open && this.view === "video" && this.vready && v.readyState >= 2 && v.videoHeight > 0 && w > 0 && Math.abs(v.videoWidth / v.videoHeight - w / h) < 0.02 ? v : null;
   }
-  /** En la vista «foto» y en el fotograma de la foto los cuadros se ven y se editan; fuera de él, según el modo. */
+  /** Los cuadros se ven en la vista «foto» y en el video desde medio segundo antes hasta medio segundo después de la foto
+   *  (solo se editan en el fotograma exacto); fuera de ese margen, según el modo. */
   alpha() {
-    if (!this.open || this.view === "foto" || this.at) return 1;
+    if (!this.open || this.view === "foto" || this.at || this.near) return 1;
     return this.boxes === "hide" ? 0 : this.boxes === "dim" ? 0.4 : 1;
   }
   boxesActive() { return !this.open || this.view === "foto" || this.at || this.boxes !== "hide"; }
@@ -341,7 +345,8 @@ export class VideoPlayer {
       }
       const t = this.media ?? el, ci = this.pidx(t);
       this.at = ci === this.it;
-    } else this.at = true;
+      this.near = Math.abs((this.pts[ci] ?? t) - this.t) <= NEAR_S + 1e-3;
+    } else this.at = this.near = true;
     this.h.redraw();
     this.emit();
   }
