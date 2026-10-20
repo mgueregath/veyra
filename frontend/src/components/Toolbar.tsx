@@ -11,10 +11,15 @@ const STATUS_TIP: Record<Status, string> = {
   disagreement: "Varias personas la revisaron y NO coinciden: necesita un revisor", final: "Un revisor fijó la versión final",
 };
 
+const ago = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? "ahora" : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`;
+};
+
 /** Barra bajo la cabecera: imagen actual y su estado, herramientas, clase activa y zoom. */
-export default function Toolbar({ index, detail, editor, ui, classes, activeClass, canWrite, lockHolder, onClass }: {
+export default function Toolbar({ index, detail, editor, ui, classes, activeClass, canWrite, lockHolder, collab, onClass }: {
   index: number; detail: FrameDetail | null; editor: BoxEditor | null; ui: EditorUi | undefined; classes: ClassDef[]; activeClass: string | undefined;
-  canWrite: boolean; lockHolder: string | null; onClass: (id: string) => void;
+  canWrite: boolean; lockHolder: string | null; collab: boolean; onClass: (id: string) => void;
 }) {
   const status: Status = detail?.status ?? "pending";
   const pos = classes.filter((c) => !c.negative);
@@ -23,7 +28,7 @@ export default function Toolbar({ index, detail, editor, ui, classes, activeClas
     <div id="toolbar" className="toolbar">
       <div className="tb-title">
         <h1 id="imgtitle" title="Número de la imagen actual dentro de la lista">Imagen {index >= 0 ? index + 1 : "—"}</h1>
-        <span id="statuschip" className={"pill st-" + status} title={STATUS_TIP[status] + (detail?.assigned_to_me ? " · está en tu cola" : "")}><i className="dot" />{STATUS_TEXT[status]}</span>
+        <span id="statuschip" className={"pill st-" + status} title={(collab && status === "final" ? "Colaborativo: la última modificación es la versión final" : STATUS_TIP[status]) + (detail?.assigned_to_me ? " · está en tu cola" : "")}><i className="dot" />{collab && status === "final" && detail?.last_edit ? `Editada por ${detail.last_edit.user} · ${ago(detail.last_edit.at)}` : collab && status === "final" ? "Revisada" : STATUS_TEXT[status]}</span>
         {lockHolder && <span id="lockwarn" className="pill warn" title="Otra persona tiene abierta esta misma imagen; puedes seguir, pero conviene coordinarse"><Icon name="alert" size={13} />{lockHolder} también la tiene abierta</span>}
       </div>
       <div className="tb-tools">

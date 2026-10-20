@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "../components/Icon";
+import ModePicker from "../components/ModePicker";
 import TopNav from "../components/TopNav";
-import { api, type DatasetStats, type EvalExample, type Project, type RunSummary, type Status } from "../api/client";
+import { api, type DatasetStats, type EvalExample, type Project, type RunSummary, type Status, type WorkMode } from "../api/client";
 
 const STATUS_LABEL: Record<Status, string> = {
   pending: "Nadie la revisó", single: "Revisada por 1 persona", agreed: "Varias, de acuerdo", disagreement: "Varias, en desacuerdo", final: "Final (decidió el revisor)",
@@ -66,29 +67,44 @@ function Quality({ project }: { project: Project }) {
   const d = q.data, cls = project.config.classes.filter((c) => !c.negative);
   const pct = (x: number | null) => (x === null ? "—" : (100 * x).toFixed(1).replace(".", ",") + " %");
   const reviewed = d.frames - d.status.pending;
+  const collab = project.config.mode === "collab";
+  const labels: Record<Status, string> = collab ? { ...STATUS_LABEL, pending: "Sin revisar", final: "Revisada (vale la última edición)" } : STATUS_LABEL;
+  const keys = (Object.keys(STATUS_LABEL) as Status[]).filter((k) => !collab || k === "pending" || k === "final");
   const bar: Record<Status, string> = { pending: "#c5cde0", single: "#0866ff", agreed: "#079447", disagreement: "#ef4444", final: "#7c3aed" };
   return (
     <div id="quality" className="stack">
       <div className="stats4">
         <div className="statc"><span className="static blue"><Icon name="image" size={24} /></span><div><b>{d.frames}</b><small>Imágenes</small></div></div>
-        <div className="statc"><span className="static purple"><Icon name="users" size={24} /></span><div><b>{reviewed}</b><small>Con revisión</small></div></div>
-        <div className="statc"><span className="static green"><Icon name="checkCircle" size={24} /></span><div><b>{pct(d.agreement.agree_rate)}</b><small>Acuerdo total</small></div></div>
-        <div className="statc"><span className="static red"><Icon name="alertCircle" size={24} /></span><div><b id="q-disagree">{d.status.disagreement}</b><small>Desacuerdo</small></div></div>
+        <div className="statc"><span className="static purple"><Icon name="users" size={24} /></span><div><b>{reviewed}</b><small>{collab ? "Revisadas" : "Con revisión"}</small></div></div>
+        {collab ? (<>
+          <div className="statc"><span className="static green"><Icon name="checkCircle" size={24} /></span><div><b id="q-pending">{d.status.pending}</b><small>Sin revisar</small></div></div>
+          <div className="statc"><span className="static red"><Icon name="users" size={24} /></span><div><b>{d.users.length}</b><small>Personas que editaron</small></div></div>
+        </>) : (<>
+          <div className="statc"><span className="static green"><Icon name="checkCircle" size={24} /></span><div><b>{pct(d.agreement.agree_rate)}</b><small>Acuerdo total</small></div></div>
+          <div className="statc"><span className="static red"><Icon name="alertCircle" size={24} /></span><div><b id="q-disagree">{d.status.disagreement}</b><small>Desacuerdo</small></div></div>
+        </>)}
       </div>
       <div className="grid2">
         <section className="card">
           <h2><span className="hic"><Icon name="image" size={17} /></span><span>Estado del etiquetado<small>Distribución de las imágenes según su estado de revisión.</small></span></h2>
-          <div className="stackbar" aria-hidden>{(Object.keys(STATUS_LABEL) as Status[]).map((s) => d.status[s] > 0 && <i key={s} style={{ flex: d.status[s], background: bar[s] }} />)}</div>
+          <div className="stackbar" aria-hidden>{keys.map((s) => d.status[s] > 0 && <i key={s} style={{ flex: d.status[s], background: bar[s] }} />)}</div>
           <table className="tbl"><thead><tr><th>Estado</th><th className="num">Imágenes</th><th className="num">Porcentaje</th></tr></thead><tbody>
-            {(Object.keys(STATUS_LABEL) as Status[]).map((s) => <tr key={s}><td><i className="dot" style={{ background: bar[s] }} /> {STATUS_LABEL[s]}</td><td className="num" id={"qs-" + s}>{d.status[s]}</td><td className="num">{d.frames ? (100 * d.status[s] / d.frames).toFixed(1).replace(".", ",") : "0,0"} %</td></tr>)}
+            {keys.map((s) => <tr key={s}><td><i className="dot" style={{ background: bar[s] }} /> {labels[s]}</td><td className="num" id={"qs-" + s}>{d.status[s]}</td><td className="num">{d.frames ? (100 * d.status[s] / d.frames).toFixed(1).replace(".", ",") : "0,0"} %</td></tr>)}
           </tbody></table>
         </section>
-        <section className="card">
-          <h2><span className="hic"><Icon name="users" size={17} /></span><span>Acuerdo entre anotadores<small>{d.agreement.frames_with_overlap} imágenes con dos o más revisiones.</small></span></h2>
-          <p className="srsum">Imágenes revisadas por 2 o más personas: <b id="q-overlap">{d.agreement.frames_with_overlap}</b></p>
-          <div className="bignums"><div><b>{pct(d.agreement.agree_rate)}</b><span>coinciden del todo</span><small>de {d.agreement.frames_with_overlap} imágenes</small></div><div><b>{pct(d.agreement.mean_f1)}</b><span>F1 medio</span><small>IoU ≥ 0,5 · misma clase</small></div></div>
-          {d.status.disagreement > 0 && <div className="callout warnc"><Icon name="alert" size={18} /><span>{d.status.disagreement} {d.status.disagreement === 1 ? "imagen necesita" : "imágenes necesitan"} revisión.</span></div>}
-        </section>
+        {collab ? (
+          <section className="card" id="q-collab">
+            <h2><span className="hic"><Icon name="users" size={17} /></span><span>Modalidad colaborativa<small>Todas las personas editan las mismas etiquetas.</small></span></h2>
+            <p className="srsum">Para cada imagen vale la última versión editada: no hay revisor ni acuerdo entre anotadores que medir. Si necesitas esa medición, cambia la modalidad en Configuración.</p>
+          </section>
+        ) : (
+          <section className="card">
+            <h2><span className="hic"><Icon name="users" size={17} /></span><span>Acuerdo entre anotadores<small>{d.agreement.frames_with_overlap} imágenes con dos o más revisiones.</small></span></h2>
+            <p className="srsum">Imágenes revisadas por 2 o más personas: <b id="q-overlap">{d.agreement.frames_with_overlap}</b></p>
+            <div className="bignums"><div><b>{pct(d.agreement.agree_rate)}</b><span>coinciden del todo</span><small>de {d.agreement.frames_with_overlap} imágenes</small></div><div><b>{pct(d.agreement.mean_f1)}</b><span>F1 medio</span><small>IoU ≥ 0,5 · misma clase</small></div></div>
+            {d.status.disagreement > 0 && <div className="callout warnc"><Icon name="alert" size={18} /><span>{d.status.disagreement} {d.status.disagreement === 1 ? "imagen necesita" : "imágenes necesitan"} revisión.</span></div>}
+          </section>
+        )}
       </div>
       <section className="card">
         <h2><span className="hic"><Icon name="users" size={17} /></span><span>Trabajo por persona<small>Imágenes revisadas y objetos etiquetados por cada miembro del equipo.</small></span></h2>
@@ -117,7 +133,7 @@ function Assign({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
     <div className="grid2 assign-grid" id="assign">
       <section className="card">
         <h2><span>Repartir imágenes</span></h2>
-        <p className="mut">Reparte entre las personas elegidas las imágenes que aún no tienen dueño ni revisión. «Doble etiquetado» asigna además ese % a una segunda persona, para medir el acuerdo.</p>
+        <p className="mut">Reparte entre las personas elegidas las imágenes que aún no tienen dueño ni revisión. {project.config.mode === "collab" ? "Como el proyecto es colaborativo, cualquiera puede editar cualquier imagen: el reparto solo ordena la cola de cada persona." : "«Doble etiquetado» asigna además ese % a una segunda persona, para medir el acuerdo."}</p>
         <h3>Personas del equipo</h3>
         <div className="people">
           {workers.map((m) => (
@@ -125,7 +141,7 @@ function Assign({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
           ))}
         </div>
         <div className="formrow">
-          <label className="fld">Doble etiquetado<span className="withunit"><input title="Porcentaje de imágenes que además se asignan a una segunda persona, para medir el acuerdo entre quienes etiquetan" type="number" min={0} max={100} value={overlap} onChange={(e) => setOverlap(+e.target.value)} /><b>%</b></span></label>
+          {project.config.mode !== "collab" && <label className="fld">Doble etiquetado<span className="withunit"><input title="Porcentaje de imágenes que además se asignan a una segunda persona, para medir el acuerdo entre quienes etiquetan" type="number" min={0} max={100} value={overlap} onChange={(e) => setOverlap(+e.target.value)} /><b>%</b></span></label>}
           <label className="fld">Semilla<input title="Semilla del reparto: con la misma semilla el reparto sale igual" type="number" value={seed} onChange={(e) => setSeed(+e.target.value)} /></label>
         </div>
         <div className="formrow">
@@ -178,8 +194,8 @@ function Datasets({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
       <p className="mut">Una versión congela las etiquetas finales de ese momento: no cambia aunque se siga etiquetando. El reparto train/val/test es por video y no cambia entre versiones.</p>
       <div className="formrow">
         <input title="Nombre de la versión del dataset (letras, números, punto, guion y guion bajo). No se puede repetir" type="text" id="ds-name" placeholder="Nombre (p. ej. v1)" value={name} onChange={(e) => setName(e.target.value)} />
-        {(["final", "agreed", "single"] as const).map((s) => (
-          <label key={s}><input title="Qué imágenes entran en la versión según su estado: finales (decidió el revisor), de acuerdo (varias personas coinciden) o de una sola persona" type="checkbox" checked={include.includes(s)} onChange={(e) => setInclude(e.target.checked ? [...include, s] : include.filter((x) => x !== s))} /> {s === "final" ? "finales" : s === "agreed" ? "de acuerdo" : "de una persona"}</label>
+        {(["final", "agreed", "single"] as const).filter((s) => project.config.mode !== "collab" || s === "final").map((s) => (
+          <label key={s}><input title="Qué imágenes entran en la versión según su estado: finales (decidió el revisor), de acuerdo (varias personas coinciden) o de una sola persona" type="checkbox" checked={include.includes(s)} onChange={(e) => setInclude(e.target.checked ? [...include, s] : include.filter((x) => x !== s))} /> {s === "final" ? (project.config.mode === "collab" ? "revisadas (última versión)" : "finales") : s === "agreed" ? "de acuerdo" : "de una persona"}</label>
         ))}
       </div>
       <div className="formrow">
@@ -470,14 +486,15 @@ function Settings({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
   const [name, setName] = useState(project.name);
   const [desc, setDesc] = useState(project.config.description ?? "");
   const [rows, setRows] = useState<Row[]>(() => rowsOf(project));
+  const [mode, setMode] = useState<WorkMode>(project.config.mode ?? "review");
   const [msg, setMsg] = useState<{ t: string; ok: boolean } | null>(null);
-  const reset = () => { setName(project.name); setDesc(project.config.description ?? ""); setRows(rowsOf(project)); };
+  const reset = () => { setName(project.name); setDesc(project.config.description ?? ""); setRows(rowsOf(project)); setMode(project.config.mode ?? "review"); };
   useEffect(() => { reset(); setMsg((m) => m); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [project]);
-  const dirty = name !== project.name || desc !== (project.config.description ?? "") || JSON.stringify(rows) !== JSON.stringify(rowsOf(project));
+  const dirty = mode !== (project.config.mode ?? "review") || name !== project.name || desc !== (project.config.description ?? "") || JSON.stringify(rows) !== JSON.stringify(rowsOf(project));
   const set = (i: number, patch: Partial<Row>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const save = useMutation({
     mutationFn: () => api.updateProject(project.id, {
-      name: name.trim(), description: desc,
+      name: name.trim(), description: desc, mode,
       classes: rows.map((r) => {
         const same = r.id && r.shortcut === (r.digit ?? r.key ?? "").toUpperCase();
         const sc = r.shortcut.trim().toLowerCase();
@@ -505,6 +522,13 @@ function Settings({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
           <small className="mut">Se usa la primera imagen del proyecto.</small>
         </section>
       </div>
+      <section className="card" id="cfg-mode">
+        <h2><span>Modalidad de trabajo<small>Cómo se decide cuál es la versión definitiva de las etiquetas de cada imagen.</small></span></h2>
+        <ModePicker value={mode} onChange={setMode} disabled={dis} />
+        {mode !== (project.config.mode ?? "review") && <p className="note warnt" id="cfg-mode-warn"><Icon name="alert" size={15} />{mode === "collab"
+          ? "Al pasar a colaborativa, para cada imagen valdrá la última versión editada; las decisiones del revisor se conservan pero dejan de aplicarse."
+          : "Al volver a «con revisión», la última versión de cada persona vuelve a contar como una revisión propia: pueden aparecer desacuerdos por resolver."}</p>}
+      </section>
       <div className="grid2 cfg-labels">
         <section className="card">
           <h2><span>Etiquetas de anotación<small>Estas clases estarán disponibles al dibujar y clasificar cajas.</small></span></h2>
@@ -586,7 +610,7 @@ function Team({ project, isAdmin, me }: { project: Project; isAdmin: boolean; me
       <h2><span>Roles del proyecto</span></h2>
       <ol className="roles">
         <li><div><strong>Administrador</strong><span>Gestiona el proyecto, sus miembros y la configuración.</span></div></li>
-        <li><div><strong>Revisor</strong><span>Compara anotaciones y decide versiones finales.</span></div></li>
+        <li><div><strong>Revisor</strong><span>{project.config.mode === "collab" ? "Etiqueta y opera modelos, datasets y entrenamientos." : "Compara anotaciones y decide versiones finales."}</span></div></li>
         <li><div><strong>Etiquetador</strong><span>Anota y revisa sus imágenes.</span></div></li>
         <li><div><strong>Lector</strong><span>Consulta el proyecto sin editar.</span></div></li>
       </ol>

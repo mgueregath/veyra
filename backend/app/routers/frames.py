@@ -9,8 +9,8 @@ from ..config import settings
 from ..db import get_db
 from ..deps import WRITE_ROLES, current_user, role_in
 from ..models import Annotation, AnnotationBox, Assignment, AuditLog, Frame, Project, Review, User
-from ..schemas import AnnotationIn, AnnotationOut, BoxOut, FrameItem, FrameOut, ProposalOut, ReviewOut
-from ..workflow import FrameState, active_lock_holder, compute_states
+from ..schemas import AnnotationIn, AnnotationOut, BoxOut, FrameItem, FrameOut, LastEdit, ProposalOut, ReviewOut
+from ..workflow import FrameState, active_lock_holder, compute_states, latest_annotations, project_mode
 
 router = APIRouter(prefix="/api", tags=["frames"])
 
@@ -59,11 +59,16 @@ def _frame_for(db: Session, frame_id: int, user: User, write=False) -> Frame:
 
 def _list_frames(project: Project, offset, limit, flt, user, db):
     states = compute_states(db, project)
-    mine_reviewed = set(
-        db.scalars(
-            select(Annotation.frame_id)
-            .join(Frame, Frame.id == Annotation.frame_id)
-            .where(Frame.project_id == project.id, Annotation.user_id == user.id, Annotation.reviewed)
+    collab = project_mode(project) == "collab"
+    mine_reviewed = (
+        set(states)
+        if collab
+        else set(
+            db.scalars(
+                select(Annotation.frame_id)
+                .join(Frame, Frame.id == Annotation.frame_id)
+                .where(Frame.project_id == project.id, Annotation.user_id == user.id, Annotation.reviewed)
+            )
         )
     )
     assigned = set(db.scalars(select(Assignment.frame_id).where(Assignment.user_id == user.id)))
@@ -87,7 +92,11 @@ def _list_frames(project: Project, offset, limit, flt, user, db):
         ids = [i for i, s in states.items() if s.status in ("single", "agreed", "disagreement")]
         q = q.where(Frame.id.in_(ids) if ids else false())
     items = []
-    for f, a in db.execute(q.offset(offset).limit(limit)):
+    rows = db.execute(q.offset(offset).limit(limit)).all()
+    shared = latest_annotations(db, project, [f.id for f, _ in rows], boxes=True) if collab else {}
+    for f, a in rows:
+        if collab:
+            a = shared.get(f.id)  # lo que se ve es la versión vigente, no solo lo propio
         counts: dict[str, int] = {}
         for b in a.boxes if a else []:
             if not b.deleted and b.label:
@@ -129,6 +138,13 @@ def get_frame(frame_id: int, user: User = Depends(current_user), db: Session = D
             final_user_id=rv.final_user_id,
             note=rv.note,
         )
+    current, last_edit = _my_annotation(db, f.id, user.id), None
+    if project_mode(project) == "collab":
+        newest = latest_annotations(db, project, [f.id], boxes=True).get(f.id)
+        if newest is not None:
+            current = newest
+            editor = db.get(User, newest.user_id)
+            last_edit = LastEdit(user=editor.display_name or editor.username, at=newest.updated_at.isoformat())
     return FrameOut(
         id=f.id,
         position=f.position,
@@ -149,7 +165,8 @@ def get_frame(frame_id: int, user: User = Depends(current_user), db: Session = D
         )
         is not None,
         review=review,
-        annotation=_ann_out(_my_annotation(db, f.id, user.id)),
+        annotation=_ann_out(current),
+        last_edit=last_edit,
         proposals=[
             ProposalOut(id=p.id, bbox=[p.x, p.y, p.w, p.h], sources=p.sources or [], score=p.score) for p in f.proposals
         ],
@@ -175,6 +192,9 @@ def save_annotation(
         ann = Annotation(frame_id=f.id, user_id=user.id)
         db.add(ann)
     ann.reviewed = body.reviewed
+    ann.updated_at = (
+        func.now()
+    )  # si solo cambian las cajas la fila no cambia: sin esto no se sabría que es la más reciente
     ann.boxes = [
         AnnotationBox(
             proposal_id=b.proposal_id if b.proposal_id in proposal_ids else None,

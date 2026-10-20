@@ -9,7 +9,15 @@ from ..db import get_db
 from ..deps import WRITE_ROLES, current_user, role_in
 from ..models import Annotation, Assignment, AuditLog, Frame, Project, Review, User
 from ..schemas import AssignIn, BoxOut, QueueIn, ReviewIn, UserAnnotationOut
-from ..workflow import acquire_lock, active_lock_holder, class_sets, compute_states, labeled, release_lock
+from ..workflow import (
+    acquire_lock,
+    active_lock_holder,
+    class_sets,
+    compute_states,
+    labeled,
+    project_mode,
+    release_lock,
+)
 
 router = APIRouter(prefix="/api", tags=["workflow"])
 REVIEW_ROLES = {"admin", "reviewer"}
@@ -35,14 +43,22 @@ def _frame(db: Session, user: User, frame_id: int, roles: set[str] | None = None
     return f
 
 
+def _not_collab(db: Session, f: Frame) -> None:
+    if project_mode(db.get(Project, f.project_id)) == "collab":
+        raise HTTPException(
+            409, "Este proyecto es colaborativo: la última modificación es la versión final, no hay revisión"
+        )
+
+
 # ---------- cola ----------
 @router.post("/projects/{project_id}/queue/next")
 def queue_next(
     project_id: int, body: QueueIn | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     """Entrega la siguiente imagen por etiquetar y la bloquea para esta persona (atómico: nadie más la recibe)."""
-    _project(db, user, project_id, WRITE_ROLES)
+    project = _project(db, user, project_id, WRITE_ROLES)
     scope = body.scope if body else "assigned"
+    collab = project_mode(project) == "collab"
     mine_done = exists().where(
         and_(Annotation.frame_id == Frame.id, Annotation.user_id == user.id, Annotation.reviewed)
     )
@@ -55,7 +71,16 @@ def queue_next(
     else:  # las propias primero y luego las que no son de nadie más
         q = q.where(mine | ~others)
     q = q.order_by(~mine, Frame.position).limit(40)
-    for fid, pos in db.execute(q).all():
+    if collab:  # en colaborativa «hecha» es que la versión vigente esté revisada, no que lo haya hecho esta persona
+        q = select(Frame.id, Frame.position).where(Frame.project_id == project_id)
+        q = q.where(mine) if scope == "assigned" else q.where(mine | ~others)
+        q = q.order_by(~mine, Frame.position).limit(400)
+        cand = db.execute(q).all()
+        done = set(compute_states(db, project, [c[0] for c in cand]))
+        cand = [c for c in cand if c[0] not in done][:40]
+    else:
+        cand = db.execute(q).all()
+    for fid, pos in cand:
         if acquire_lock(db, fid, user.id):
             return {"frame_id": fid, "position": pos}
     return {"frame_id": None, "position": None}
@@ -77,6 +102,9 @@ def assign(project_id: int, body: AssignIn, user: User = Depends(current_user), 
     """Reparte imágenes entre usuarios (round-robin con semilla) y, opcionalmente, un % a una 2.ª persona."""
     p = _project(db, user, project_id, {"admin"})
     from ..models import Membership
+
+    if project_mode(p) == "collab":
+        body.overlap_pct = 0  # el doble etiquetado mide acuerdo entre personas: no aplica si todos editan lo mismo
 
     users = []
     for name in body.users:
@@ -190,6 +218,7 @@ def frame_annotations(frame_id: int, user: User = Depends(current_user), db: Ses
 def review_frame(frame_id: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """El revisor fija cuál anotación es la final (la de otra persona o la suya, tras corregirla)."""
     f = _frame(db, user, frame_id, REVIEW_ROLES)
+    _not_collab(db, f)
     if not db.scalar(
         select(Annotation.id).where(Annotation.frame_id == f.id, Annotation.user_id == body.final_user_id)
     ):
@@ -217,6 +246,7 @@ def review_frame(frame_id: int, body: ReviewIn, user: User = Depends(current_use
 @router.delete("/frames/{frame_id}/review")
 def undo_review(frame_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     f = _frame(db, user, frame_id, REVIEW_ROLES)
+    _not_collab(db, f)
     rv = db.scalar(select(Review).where(Review.frame_id == f.id))
     if rv:
         db.delete(rv)
@@ -262,7 +292,11 @@ def quality(project_id: int, user: User = Depends(current_user), db: Session = D
             for j in range(i + 1, len(lst)):
                 f1s.append(consensus.pair_f1(labeled(lst[i]), labeled(lst[j]), negative))
     overlap = sum(1 for lst in by_frame.values() if len(lst) >= 2)
+    collab = project_mode(p) == "collab"
+    if collab:
+        overlap, f1s = 0, []
     return {
+        "mode": "collab" if collab else "review",
         "frames": total,
         "status": status_counts,
         "users": sorted(per_user.values(), key=lambda x: x["user"]),

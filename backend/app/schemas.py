@@ -64,6 +64,11 @@ class ReviewOut(BaseModel):
     note: str | None
 
 
+class LastEdit(BaseModel):
+    user: str
+    at: str
+
+
 class FrameOut(BaseModel):
     id: int
     position: int
@@ -83,6 +88,7 @@ class FrameOut(BaseModel):
     locked_by: str | None = None
     assigned_to_me: bool = False
     review: ReviewOut | None = None
+    last_edit: LastEdit | None = None  # modalidad colaborativa: quién modificó por última vez la versión vigente
 
 
 class FrameItem(BaseModel):
@@ -148,9 +154,11 @@ class ClassIn(BaseModel):
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: str | None = Field(None, max_length=1000)
+    mode: str = Field("review", pattern="^(review|collab)$")
 
 
 class ProjectUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=128)
     description: str | None = Field(None, max_length=1000)
     classes: list[ClassIn] | None = None
+    mode: str | None = Field(None, pattern="^(review|collab)$")

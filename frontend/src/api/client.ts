@@ -1,20 +1,21 @@
 export interface Me { id: number; username: string; display_name: string | null; is_superuser: boolean }
 export interface ClassDef { id: string; name: string; key?: string; digit?: string; color: string; negative?: boolean }
 export interface SourceDef { short: string; name: string }
-export interface ProjectConfig { classes: ClassDef[]; box_sources?: Record<string, SourceDef>; description?: string }
+export type WorkMode = "review" | "collab";
+export interface ProjectConfig { classes: ClassDef[]; box_sources?: Record<string, SourceDef>; description?: string; mode?: WorkMode }
 export interface Project { id: number; slug: string; name: string; role: string; config: ProjectConfig; n_frames: number; n_reviewed: number; cover_frame_id: number | null }
-export interface ProjectPatch { name?: string; description?: string; classes?: Partial<ClassDef>[] }
+export interface ProjectPatch { name?: string; description?: string; classes?: Partial<ClassDef>[]; mode?: WorkMode }
 export interface Proposal { id: number; bbox: [number, number, number, number]; sources: string[]; score: number | null }
 export interface AnnBox { id?: number | null; proposal_id?: number | null; bbox: [number, number, number, number]; label: string | null; manual: boolean; orig_bbox?: number[] | null; sources: string[]; score: number | null; deleted: boolean }
 export interface Annotation { reviewed: boolean; boxes: AnnBox[] }
 export interface ReviewInfo { reviewer: string; final_user: string; final_user_id: number; note: string | null }
-export interface FrameDetail { id: number; position: number; video: string; video_id: number; has_video: boolean; frame_index: number; t: number | null; width: number; height: number; stratum: string | null; proposals: Proposal[]; annotation: Annotation | null; n_annotators: number; status: Status; n_reviewed: number; locked_by: string | null; assigned_to_me: boolean; review: ReviewInfo | null }
+export interface FrameDetail { id: number; position: number; video: string; video_id: number; has_video: boolean; frame_index: number; t: number | null; width: number; height: number; stratum: string | null; proposals: Proposal[]; annotation: Annotation | null; n_annotators: number; last_edit?: { user: string; at: string } | null; status: Status; n_reviewed: number; locked_by: string | null; assigned_to_me: boolean; review: ReviewInfo | null }
 export type Status = "pending" | "single" | "agreed" | "disagreement" | "final";
 export type FrameFilter = "all" | "mine_pending" | "assigned_pending" | "pending" | "single" | "agreed" | "disagreement" | "final" | "needs_review";
 export interface FrameItem { id: number; position: number; video: string; frame_index: number; t: number | null; stratum: string | null; reviewed: boolean; origin: string | null; status: Status; assigned: boolean; n_labeled: Record<string, number> }
 export interface UserAnnotation { user_id: number; user: string; display_name?: string | null; reviewed: boolean; boxes: AnnBox[] }
 export interface Member { username: string; display_name: string | null; role: string }
-export interface Quality { frames: number; status: Record<Status, number>; users: { user: string; reviewed: number; boxes: Record<string, number> }[]; agreement: { frames_with_overlap: number; mean_f1: number | null; agree_rate: number | null } }
+export interface Quality { mode?: WorkMode; frames: number; status: Record<Status, number>; users: { user: string; reviewed: number; boxes: Record<string, number> }[]; agreement: { frames_with_overlap: number; mean_f1: number | null; agree_rate: number | null } }
 export interface DatasetSummary { id: number; name: string; n_items: number; rules: { include: string[]; split: number[]; seed: string }; created_at: string }
 export interface SplitStats { frames: number; frames_with_positive: number; videos: number; boxes: Record<string, number> }
 export interface DatasetStats { id: number; name: string; rules: DatasetSummary["rules"]; n_items: number; splits: Record<"train" | "val" | "test", SplitStats>; warnings: string[] }
@@ -73,7 +74,7 @@ export const api = {
   login: (username: string, password: string) => req<Me>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   projects: () => req<Project[]>("/api/projects"),
-  createProject: (body: { name: string; description?: string }) => req<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
+  createProject: (body: { name: string; description?: string; mode?: WorkMode }) => req<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   updateProject: (pid: number, body: ProjectPatch) => req<Project>(`/api/projects/${pid}`, { method: "PATCH", body: JSON.stringify(body) }),
   frames: (pid: number, offset = 0, limit = 500, filter: FrameFilter = "all") => req<FrameItem[]>(`/api/projects/${pid}/frames?offset=${offset}&limit=${limit}&filter=${filter}`),
   /** Carga el listado completo por páginas (la API limita cada petición a 500). */

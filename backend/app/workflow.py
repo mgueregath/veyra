@@ -17,6 +17,35 @@ LOCK_TTL = 180  # segundos; el visor renueva el bloqueo mientras la imagen está
 STATUSES = ("pending", "single", "agreed", "disagreement", "final")
 
 
+# review: cada persona etiqueta y un revisor fija la versión final
+# collab: todos editan las mismas etiquetas y la última modificación es la final
+MODES = ("review", "collab")
+
+
+def project_mode(project: Project) -> str:
+    mode = (project.config or {}).get("mode", "review")
+    return mode if mode in MODES else "review"
+
+
+def latest_annotations(
+    db: Session, project: Project, frame_ids: list[int] | None = None, boxes: bool = False
+) -> dict[int, Annotation]:
+    """Modalidad colaborativa: la versión vigente de cada imagen es la última anotación modificada, de quien sea."""
+    from .models import Frame
+
+    q = (
+        select(Annotation)
+        .join(Frame, Frame.id == Annotation.frame_id)
+        .where(Frame.project_id == project.id)
+        .order_by(Annotation.frame_id, Annotation.updated_at, Annotation.id)
+    )
+    if boxes:
+        q = q.options(selectinload(Annotation.boxes))
+    if frame_ids is not None:
+        q = q.where(Annotation.frame_id.in_(frame_ids))
+    return {a.frame_id: a for a in db.scalars(q)}  # al ir ordenadas, la última de cada imagen es la que queda
+
+
 def class_sets(project: Project) -> tuple[list[str], set[str]]:
     """(clases positivas en orden, ids de clases negativas)."""
     classes = (project.config or {}).get("classes", [])
@@ -40,6 +69,13 @@ def compute_states(db: Session, project: Project, frame_ids: list[int] | None = 
     """Estado de las imágenes que tienen alguna anotación revisada o una revisión (el resto es `pending`)."""
     from .models import Frame
 
+    if project_mode(project) == "collab":
+        # hay una sola versión vigente: la más reciente. Si está marcada como revisada, la imagen es final.
+        return {
+            fid: FrameState(status="final", n_reviewed=1, reviewers=[a.user_id], final_user_id=a.user_id)
+            for fid, a in latest_annotations(db, project, frame_ids).items()
+            if a.reviewed
+        }
     _, negative = class_sets(project)
     q = (
         select(Annotation)

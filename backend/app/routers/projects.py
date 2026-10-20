@@ -21,18 +21,22 @@ from ..models import (
     Video,
 )
 from ..schemas import ClassIn, ProjectCreate, ProjectOut, ProjectUpdate
+from ..workflow import compute_states, project_mode
 
 router = APIRouter(prefix="/api", tags=["projects"])
 
 
 def _out(db: Session, user: User, p: Project) -> ProjectOut:
     n = db.scalar(select(func.count()).select_from(Frame).where(Frame.project_id == p.id))
-    r = db.scalar(
-        select(func.count())
-        .select_from(Annotation)
-        .join(Frame, Frame.id == Annotation.frame_id)
-        .where(Frame.project_id == p.id, Annotation.user_id == user.id, Annotation.reviewed)
-    )
+    if project_mode(p) == "collab":  # colaborativa: el avance es del proyecto, no de cada persona
+        r = len(compute_states(db, p))
+    else:
+        r = db.scalar(
+            select(func.count())
+            .select_from(Annotation)
+            .join(Frame, Frame.id == Annotation.frame_id)
+            .where(Frame.project_id == p.id, Annotation.user_id == user.id, Annotation.reviewed)
+        )
     cover = db.scalar(select(Frame.id).where(Frame.project_id == p.id).order_by(Frame.id).limit(1))
     return ProjectOut(
         id=p.id,
@@ -65,6 +69,7 @@ def create_project(body: ProjectCreate, user: User = Depends(current_user), db: 
         raise HTTPException(409, "Ya existe un proyecto con ese nombre")
     config = copy.deepcopy(DEFAULT_CONFIG)
     config["description"] = (body.description or "").strip()
+    config["mode"] = body.mode
     p = Project(slug=_slug(db, name), name=name, config=config)
     db.add(p)
     db.flush()
@@ -147,6 +152,9 @@ def update_project(
     if body.description is not None:
         config["description"] = body.description.strip()
         detail["description"] = True
+    if body.mode is not None and body.mode != config.get("mode", "review"):
+        config["mode"] = body.mode
+        detail["mode"] = body.mode
     if body.classes is not None:
         config["classes"] = _merge_classes(db, p, body.classes)
         detail["classes"] = [c["id"] for c in config["classes"]]
@@ -190,11 +198,17 @@ def project_stats(project_id: int, user: User = Depends(current_user), db: Sessi
             unlabeled += 1
         else:
             by_label[b.label] = by_label.get(b.label, 0) + 1
-    reviewed = db.scalar(
-        select(func.count())
-        .select_from(Annotation)
-        .join(Frame, Frame.id == Annotation.frame_id)
-        .where(Frame.project_id == project_id, Annotation.user_id == user.id, Annotation.reviewed)
+    project = db.get(Project, project_id)
+    done = set(compute_states(db, project)) if project_mode(project) == "collab" else None
+    reviewed = (
+        len(done)
+        if done is not None
+        else db.scalar(
+            select(func.count())
+            .select_from(Annotation)
+            .join(Frame, Frame.id == Annotation.frame_id)
+            .where(Frame.project_id == project_id, Annotation.user_id == user.id, Annotation.reviewed)
+        )
     )
     assigned = db.scalar(
         select(func.count())
@@ -202,13 +216,23 @@ def project_stats(project_id: int, user: User = Depends(current_user), db: Sessi
         .join(Frame, Frame.id == Assignment.frame_id)
         .where(Frame.project_id == project_id, Assignment.user_id == user.id)
     )
-    assigned_done = db.scalar(
-        select(func.count())
-        .select_from(Assignment)
-        .join(Frame, Frame.id == Assignment.frame_id)
-        .join(Annotation, (Annotation.frame_id == Assignment.frame_id) & (Annotation.user_id == Assignment.user_id))
-        .where(Frame.project_id == project_id, Assignment.user_id == user.id, Annotation.reviewed)
-    )
+    if done is not None:
+        mine = set(
+            db.scalars(
+                select(Assignment.frame_id)
+                .join(Frame, Frame.id == Assignment.frame_id)
+                .where(Frame.project_id == project_id, Assignment.user_id == user.id)
+            )
+        )
+        assigned_done = len(mine & done)
+    else:
+        assigned_done = db.scalar(
+            select(func.count())
+            .select_from(Assignment)
+            .join(Frame, Frame.id == Assignment.frame_id)
+            .join(Annotation, (Annotation.frame_id == Assignment.frame_id) & (Annotation.user_id == Assignment.user_id))
+            .where(Frame.project_id == project_id, Assignment.user_id == user.id, Annotation.reviewed)
+        )
     return {
         "frames": n,
         "reviewed": reviewed,

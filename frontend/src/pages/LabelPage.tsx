@@ -230,7 +230,8 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   const cnt = doc ? countLabels(doc) : { byLabel: {}, unlabeled: 0, manual: 0 };
   const st = stats.data;
   const reviewedN = st?.reviewed ?? 0;
-  const canReview = project.role === "admin" || project.role === "reviewer";
+  const collab = project.config.mode === "collab";
+  const canReview = (project.role === "admin" || project.role === "reviewer") && !collab; // en colaborativa no hay revisión: manda la última edición
   const activeTab = canReview ? tab : "video";
   const setTabP = (t: "video" | "review") => { setTab(t); LS.set("sidetab", t); };
   const plural = (n: string) => (n.toLowerCase().endsWith("s") ? n : n + "s");
@@ -240,7 +241,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   return (
     <div className="lp2">
       <TopNav project={project} user={user} active="label" onProjects={onExit} onLabel={() => undefined} onModels={onModels} onAdmin={onAdmin} onHelp={() => setHelp(true)} onLogout={onLogout} />
-      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} onClass={setClass} />
+      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} collab={collab} onClass={setClass} />
       <div id="main">
         <div id="stage">
           <canvas id="cv" ref={canvasRef} />
@@ -283,7 +284,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
                 <p className="hint">En cada caja: {Object.entries(sources).map(([k, v], i) => <span key={k}>{i ? ", " : ""}<b>{v.short}</b> = {v.name.toLowerCase()}</span>)}. Línea punteada = sin etiquetar.</p>
                 <h4 className="cap">Todo el proyecto</h4>
                 <div className="stats" id="stats">
-                  <span>Revisadas por ti</span><span id="pcount">{reviewedN} / {st?.frames ?? frames.length}</span>
+                  <span>{collab ? "Revisadas" : "Revisadas por ti"}</span><span id="pcount">{reviewedN} / {st?.frames ?? frames.length}</span>
                   {classes.map((c) => <Fragment key={c.id}><span>{c.name}</span><span>{st?.by_label[c.id] ?? 0}</span></Fragment>)}
                   <span>Dibujadas a mano</span><span>{st?.manual ?? 0}</span>
                   <span>Sin etiquetar</span><span>{st?.unlabeled ?? 0}</span>
@@ -302,7 +303,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
         </div>
       </aside>
       <Carousel frames={frames} curId={curId} filter={filter} setFilter={setFilter} go={setCurId} onPrev={() => goIdx(cur - 1)} onNext={() => goIdx(cur + 1)}
-        gotoVal={gotoVal} setGotoVal={setGotoVal} onGoto={gotoNum} reviewed={reviewedN} total={st?.frames ?? frames.length} />
+        gotoVal={gotoVal} setGotoVal={setGotoVal} onGoto={gotoNum} reviewed={reviewedN} total={st?.frames ?? frames.length} collab={collab} />
       {help && <HelpModal onClose={() => setHelp(false)} />}
     </div>
   );
