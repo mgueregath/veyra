@@ -1,0 +1,47 @@
+{
+  "classes": [
+    {
+      "id": "louse",
+      "name": "Piojo",
+      "key": "l",
+      "digit": "1",
+      "color": "#3fb950"
+    },
+    {
+      "id": "fly",
+      "name": "Mosca",
+      "key": "m",
+      "digit": "2",
+      "color": "#b388ff"
+    },
+    {
+      "id": "not_louse",
+      "name": "Ni piojo ni mosca",
+      "key": "n",
+      "color": "#f85149",
+      "negative": true
+    }
+  ],
+  "box_sources": {
+    "motion": {
+      "short": "mov",
+      "name": "Movimiento"
+    },
+    "blob": {
+      "short": "mancha",
+      "name": "Mancha (apariencia)"
+    },
+    "model": {
+      "short": "modelo",
+      "name": "Modelo"
+    },
+    "manual": {
+      "short": "manual",
+      "name": "Dibujada a mano"
+    }
+  },
+  "proposer": {
+    "module": "plugins.piojos_blob",
+    "fn": "propose"
+  }
+}

@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Etiquetar piojos</title>
+<style>
+:root{--bg:#101215;--surface:#181b20;--surface2:#20242b;--line:#2c313a;--fg:#e8eaed;--mut:#9aa3ad;
+ --ok:#3fb950;--bad:#f85149;--unl:#e3b341;--man:#4cc9f0;--fly:#b388ff;--acc:#4cc9f0;--canvas:#0b0c0e}
+@media (prefers-color-scheme: light){:root{--bg:#eef0f3;--surface:#fff;--surface2:#f3f5f8;--line:#d8dde3;--fg:#1f2328;--mut:#5b6570;
+ --ok:#1a7f37;--bad:#cf222e;--unl:#9a6700;--man:#0969da;--fly:#8250df;--acc:#0969da;--canvas:#dfe3e8}}
+*{box-sizing:border-box}
+body{margin:0;height:100vh;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;
+ display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:auto minmax(0,1fr) auto;grid-template-areas:"top top" "main side" "strip strip"}
+kbd{background:var(--surface2);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font:12px ui-monospace,monospace}
+button{font:inherit;color:var(--fg);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--acc)}button.primary{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+button.ghost{background:transparent}
+/* barra superior: solo título e información de la foto (los controles viven en el menú lateral) */
+#top{grid-area:top;display:flex;align-items:center;gap:16px;padding:7px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{font-weight:700;font-size:15px;white-space:nowrap}
+#info{min-width:0;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#info b{color:var(--fg)}
+[hidden]{display:none!important}
+button.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+/* zona de la foto: SOLO el lienzo */
+#main{grid-area:main;position:relative;overflow:hidden;background:var(--canvas);display:flex}
+#stage{position:relative;flex:1;min-width:0;overflow:hidden}
+canvas{display:block;width:100%;height:100%;cursor:grab}
+#vid{position:fixed;left:-99999px;top:0;width:320px;pointer-events:none}
+/* menú lateral */
+#side{grid-area:side;background:var(--surface);border-left:1px solid var(--line);overflow:hidden;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:0}
+#sidescroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding-right:2px}
+#viddock{flex:none;max-height:62%;overflow:auto;border-top:1px solid var(--line);padding-top:8px}      /* el video siempre a la vista: no tapa nada, el resto se desplaza por encima */
+.msg{flex:none;background:var(--bad);color:#fff;font-weight:600;border-radius:8px;padding:6px 10px;font-size:13px}.msg.ok{background:var(--ok)}
+/* bloques fijos del menú (todo lo que NO es leyenda) */
+.blk{border:1px solid var(--line);border-radius:10px;background:var(--surface2);padding:8px 10px;display:flex;flex-direction:column;gap:8px}
+.blk>h3{margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;display:flex;align-items:center;gap:6px}
+.blk>h3 .sx{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;font-size:12px;white-space:nowrap}
+.blk button{padding:6px 6px;font-size:12.5px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}.blk .full{width:100%}
+/* controles de etiquetado: flotan sobre la imagen, junto a la caja que se presionó */
+#pop{position:absolute;z-index:5;width:252px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 8px 28px #000a;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+#pop .ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap}#pop .pk{color:var(--mut);font-size:12px}
+#pop .pb{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}#pop .pb2{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+#pop button{padding:5px 3px;font-size:12.5px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#pop button.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+/* ventana de ayuda */
+#helpm{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:60}
+#helpm .hbox{width:min(780px,92vw);max-height:86vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+#helpm .hhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:15px}
+#helpbtn{margin-left:auto}
+#restoreRow{border-top:1px dashed var(--line);padding-top:8px;font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:6px}
+details.sec{border:1px solid var(--line);border-radius:10px;background:var(--surface2)}
+details.sec>summary{cursor:pointer;list-style:none;padding:7px 10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;display:flex;align-items:center;gap:6px}
+details.sec>summary::-webkit-details-marker{display:none}details.sec>summary::before{content:'▸';display:inline-block;transition:transform .12s}details.sec[open]>summary::before{transform:rotate(90deg)}
+details.sec>summary .sx{white-space:nowrap;margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;font-size:12px}
+.sec .body{padding:2px 10px 10px;display:flex;flex-direction:column;gap:8px}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:6px}.r2v{display:grid;grid-template-columns:1fr 1fr;gap:6px}.r2v button{font-size:12px;padding:6px 3px}.cb button{padding:5px 3px}
+#card .head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}#card .k2{color:var(--mut);font-size:12px;margin-bottom:8px}.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.r6{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.sec button{padding:6px 6px;font-size:12.5px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}.sec .full{width:100%}
+.rfoto{display:grid;grid-template-columns:36px 36px 1fr;gap:6px}.rfoto2{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.cls.r3{grid-template-columns:1fr 1fr 1fr}.cls button kbd{margin-left:2px}
+.chip{display:inline-block;background:var(--surface);border:1px solid var(--line);color:var(--fg);border-radius:99px;padding:2px 10px;font-size:12px}
+.chip.ok{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:700}.chip.draw{background:var(--acc);border-color:var(--acc);color:#001;font-weight:700}
+.zrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:center}
+.zrow button{display:flex;align-items:center;justify-content:center;gap:6px}.zrow svg{display:block}
+.prog{display:flex;align-items:center;gap:8px}.bar{flex:1;height:8px;border-radius:99px;background:var(--surface);overflow:hidden;border:1px solid var(--line)}
+#bar{height:100%;width:0;background:var(--ok);transition:width .2s}#pcount{color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
+.goto{display:flex;align-items:center;gap:5px;color:var(--mut);white-space:nowrap;font-size:12.5px}
+#goto{height:28px;width:64px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:5px 8px;font:inherit}
+.vtl{position:relative;padding:2px 0}#vseek{width:100%;margin:0;accent-color:var(--acc);display:block}
+#vmark{position:absolute;top:0;width:2px;height:100%;background:var(--ok);pointer-events:none;border-radius:2px}
+.vtime{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;font-size:13px}#vrel{font-weight:700}
+#vwin{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vspd{display:grid;grid-template-columns:auto 30px 1fr auto 30px;gap:6px;align-items:center;font-size:12px;color:var(--mut)}
+#vrate{background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:3px 4px;font:inherit}
+#vspd{font-variant-numeric:tabular-nums;font-weight:700;min-width:40px;text-align:center;color:var(--fg)}
+.vopt{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}.vopt button{flex:1}.vopt label{display:flex;align-items:center;gap:5px}
+.leg{display:grid;gap:6px}.leg div{display:flex;align-items:center;gap:10px}
+.sw{width:22px;height:14px;border-radius:3px;border:2px solid;flex:none}.sw.unl{border-style:dashed}
+.leg .n{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--mut)}
+.leg small{color:var(--mut);display:block;line-height:1.2}
+#card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-height:44px}
+#card .empty{color:var(--mut);font-size:13px}#card .k{color:var(--mut)}#card table{width:100%;border-collapse:collapse;margin:6px 0 10px}#card td{padding:1px 0}#card td:last-child{text-align:right}
+.badge{display:inline-block;border-radius:99px;padding:1px 10px;font-size:12px;font-weight:600;border:1px solid}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:6px}.btns button{padding:6px 8px;font-size:13px}
+.btns .full{grid-column:1/3}
+.restore{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--mut)}.restore .btns{margin-top:6px}
+.cls{display:grid;grid-template-columns:1fr 1fr;gap:6px}.cls button{display:flex;align-items:center;justify-content:center;gap:8px;padding:7px}
+.cls button.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc);font-weight:600}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.hint{margin:0;font-size:12px;color:var(--mut)}
+.stats{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-variant-numeric:tabular-nums;font-size:13px}.stats span:nth-child(even){text-align:right}
+.help p{margin:0 0 8px;color:var(--mut);font-size:12px}.help b{color:var(--fg)}
+/* pantallas bajas (portátiles): menos relleno para que quepan a la vez las secciones y el video */
+@media (max-height:860px){
+ #side{padding:8px 10px;gap:6px}#sidescroll{gap:6px}
+ details.sec>summary{padding:4px 10px}.sec .body{gap:6px;padding:1px 8px 7px}
+ .sec button{padding:4px 5px}.cls button{padding:5px}#vwin{display:none}#card{padding:6px 8px}
+ #card .k2{margin-bottom:5px}.cb button{padding:3px 2px}#viddock{padding-top:6px}.prog .bar{height:6px}
+}
+/* carrusel */
+#stripwrap{grid-area:strip;background:var(--surface);border-top:1px solid var(--line);display:flex;align-items:stretch;gap:8px;padding:8px 12px}
+.sbtn{align-self:center;padding:4px 10px;font-size:18px;line-height:1}
+#strip{flex:1;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;padding:4px 2px;scrollbar-width:thin}
+.th{position:relative;flex:none;width:112px;height:84px;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid var(--line);background:#000}
+.th img{width:100%;height:100%;object-fit:contain;display:block}
+.th:hover{border-color:var(--mut)}.th.cur{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.th.rev{border-color:var(--ok)}.th.cur.rev{border-color:var(--acc)}
+.th .i{position:absolute;left:4px;top:4px;background:#000b;color:#fff;border-radius:4px;padding:0 5px;font-size:11px}
+.th .c{position:absolute;right:4px;bottom:4px;display:flex;gap:3px}
+.th .c span{background:#000c;color:#fff;border-radius:99px;padding:0 6px;font-size:11px;font-weight:700}
+.th .c .l{background:var(--ok)}.th .c .f{background:var(--fly)}.th .vb{position:absolute;left:4px;bottom:4px;background:#000c;color:#fff;border-radius:4px;padding:0 5px;font-size:11px}.th .ck{position:absolute;right:4px;top:4px;background:var(--ok);color:#fff;border-radius:99px;width:18px;height:18px;text-align:center;font-size:12px;line-height:18px}
+.more{flex:none;align-self:center;color:var(--mut);font-size:12px;text-align:center;padding:0 10px}
+.filter{align-self:center;color:var(--mut);font-size:13px;white-space:nowrap;display:flex;gap:6px;align-items:center}
+</style></head><body>
+<header id="top">
+ <div class="brand">Etiquetar piojos</div>
+ <div id="info"></div>
+ <button id="helpbtn" class="ghost" title="Atajos y ayuda (?)" onmousedown="event.preventDefault()">? Ayuda</button>
+</header>
+<div id="main"><div id="stage"><canvas id="cv"></canvas>
+  <div id="pop" hidden></div>
+  <video id="vid" muted playsinline preload="auto"></video></div></div>
+<aside id="side">
+ <div id="vmsg" class="msg" hidden></div>
+ <div id="sidescroll">
+ <section class="blk" id="s-foto"><h3>Foto <span class="sx" id="pcount"></span></h3>
+  <div class="prog"><div class="bar"><div id="bar"></div></div></div>
+  <div class="rfoto">
+   <button id="prev" title="Imagen anterior (A o ←)" aria-label="Anterior" onmousedown="event.preventDefault()">←</button>
+   <button id="next" title="Imagen siguiente (D o →)" aria-label="Siguiente" onmousedown="event.preventDefault()">→</button>
+   <button id="rev" class="primary" title="Las cajas sin tocar pasan a «ni piojo ni mosca» y se pasa a la siguiente (Espacio)" onmousedown="event.preventDefault()">✔ Revisado y siguiente</button>
+  </div>
+  <div class="rfoto2">
+   <button id="skip" class="ghost" title="Saltar a la siguiente sin revisar (S)" onmousedown="event.preventDefault()">Sin revisar ⇥</button>
+   <label class="goto" title="Ir a una imagen por su número (atajo G)">Ir a <input id="goto" type="number" min="1" onmousedown="event.stopPropagation()">/<span id="ntotal">0</span> <button id="gobtn" onmousedown="event.preventDefault()">Ir</button></label>
+  </div>
+  <div id="restoreRow" hidden><span id="rtext"></span>
+   <div class="r2"><button id="rrlast" title="Restaurar el último cuadro borrado (Z)" onmousedown="event.preventDefault()">Restaurar último <kbd>Z</kbd></button><button id="rrall" title="Restaurar todos los cuadros borrados de esta imagen" onmousedown="event.preventDefault()">Restaurar todos</button></div></div>
+ </section>
+ <section class="blk" id="s-vista"><h3>Vista <span class="sx" id="mode"></span></h3>
+  <div class="zrow">
+   <button id="zout" title="Alejar (−)" aria-label="Alejar" onmousedown="event.preventDefault()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="6.5"/><path d="M15 15l5.5 5.5M7 10h6"/></svg></button>
+   <button id="zoom" title="Ajustar a la ventana (F)" onmousedown="event.preventDefault()">100 %</button>
+   <button id="zin" title="Acercar (+)" aria-label="Acercar" onmousedown="event.preventDefault()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="6.5"/><path d="M15 15l5.5 5.5M7 10h6M10 7v6"/></svg></button>
+   <button id="zfit" class="ghost" title="Ajustar la imagen a la ventana (F)" onmousedown="event.preventDefault()">Ajustar</button>
+  </div>
+  <div class="cls r3"><button id="clsL" class="on" title="Clase Piojo (1): lo que recibe una caja al presionarla, moverla o dibujarla" onmousedown="event.preventDefault()"><span class="dot" style="background:var(--ok)"></span>Piojo<kbd>1</kbd></button><button id="clsF" title="Clase Mosca (2): lo que recibe una caja al presionarla, moverla o dibujarla" onmousedown="event.preventDefault()"><span class="dot" style="background:var(--fly)"></span>Mosca<kbd>2</kbd></button><button id="bbox" title="Dibujar una caja nueva sobre la imagen (B); recibe la clase activa" onmousedown="event.preventDefault()">＋ Caja<kbd>B</kbd></button></div>
+ </section>
+ <details class="sec" id="s-leyenda"><summary>Leyenda y resumen</summary><div class="body">
+  <div class="leg">
+   <div><span class="sw unl" style="border-color:var(--unl)"></span><span>Sin etiquetar<small>propuesta del detector</small></span><span class="n" id="cU">0</span></div>
+   <div><span class="sw" style="border-color:var(--ok)"></span><span>Piojo</span><span class="n" id="cL">0</span></div>
+   <div><span class="sw" style="border-color:var(--fly)"></span><span>Mosca</span><span class="n" id="cF">0</span></div>
+   <div><span class="sw" style="border-color:var(--bad)"></span><span>Ni piojo ni mosca<small>cajas sin tocar al revisar</small></span><span class="n" id="cN">0</span></div>
+  </div>
+  <p class="hint">Los números son de esta imagen. En cada caja: <b>mov</b> = detector de movimiento, <b>mancha</b> = detector de apariencia, <b>manual</b> = la dibujaste tú.</p>
+  <h2 style="margin:6px 0 2px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)">Todo el set</h2>
+  <div class="stats" id="stats"></div>
+ </div></details>
+ </div>
+ <div id="viddock">
+ <section class="blk" id="s-video"><h3>Video original <span class="sx" id="vstat"></span></h3>
+  <button id="vbtn" class="full" title="Ver el video original: 5 s antes y 5 s después de la foto (V)" onmousedown="event.preventDefault()">▶ Video ±5 s <kbd>V</kbd></button>
+  <div id="vctrl" hidden>
+   <span id="vwin"></span>
+   <div class="vtl"><input id="vseek" type="range" min="0" max="1000" step="1" aria-label="Posición dentro de la ventana de 10 s"><div id="vmark" title="Instante de la foto"></div></div>
+   <div class="vtime"><span id="vnow">—</span><span id="vrel"></span></div>
+   <div class="r6">
+    <button id="vstart" title="Inicio de la ventana (Inicio)" onmousedown="event.preventDefault()">⏮</button>
+    <button id="vm10" title="10 fotogramas atrás (&lt;)" onmousedown="event.preventDefault()">−10</button>
+    <button id="vm1" title="1 fotograma atrás (,)" onmousedown="event.preventDefault()">◀</button>
+    <button id="vplay" title="Reproducir / pausar (P)" onmousedown="event.preventDefault()">▶</button>
+    <button id="vp1" title="1 fotograma adelante (.)" onmousedown="event.preventDefault()">▶</button>
+    <button id="vp10" title="10 fotogramas adelante (&gt;)" onmousedown="event.preventDefault()">+10</button>
+   </div>
+   <div class="r2v">
+    <button id="vsnap" title="Volver a la imagen con sus cuadros (R)" onmousedown="event.preventDefault()">↩ Volver a la imagen</button>
+    <button id="vsave" title="Guardar el fotograma que se ve como una imagen nueva del conjunto (I)" onmousedown="event.preventDefault()">Guardar instantánea</button>
+   </div>
+   <div class="vspd"><span>Velocidad</span><button id="vslow" title="Más lento ([)" onmousedown="event.preventDefault()">−</button>
+    <select id="vrate" title="Velocidad de reproducción"><option>0.1</option><option>0.25</option><option>0.5</option><option>0.75</option><option selected>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option></select>
+    <span id="vspd">1×</span><button id="vfast" title="Más rápido (])" onmousedown="event.preventDefault()">+</button></div>
+   <div class="vopt"><label><input type="checkbox" id="vloop"> Repetir</label>
+    <button id="vboxes" title="Cuándo se muestran los cuadros durante el video (O). Por defecto, solo en el fotograma de la foto" onmousedown="event.preventDefault()">Cuadros: solo en la foto</button></div>
+  </div>
+ </section>
+ </div>
+</aside>
+<footer id="stripwrap">
+ <button class="sbtn ghost" id="sl" onmousedown="event.preventDefault()">‹</button>
+ <div id="strip"></div>
+ <button class="sbtn ghost" id="sr" onmousedown="event.preventDefault()">›</button>
+ <label class="filter"><input type="checkbox" id="pend" onmousedown="event.preventDefault()"> Solo sin revisar</label>
+</footer>
+<div id="helpm" hidden><div class="hbox"><div class="hhead"><b>Atajos y ayuda</b><button id="helpx" title="Cerrar (Esc)" onmousedown="event.preventDefault()">×</button></div><div class="help">
+  <p><b>Etiquetar:</b> presiona una caja (o muévela) y recibe la <b>clase activa</b> (<kbd>1</kbd> piojo, <kbd>2</kbd> mosca). Al presionarla, <b>sus controles aparecen sobre la imagen, junto a la caja</b>: piojo <kbd>L</kbd>, mosca <kbd>M</kbd>, ni uno <kbd>N</kbd>, alternar <kbd>T</kbd>, quitar etiqueta <kbd>U</kbd>, borrar <kbd>X</kbd> y volver a la posición original. <b>Mover:</b> arrastra la caja. <b>Tamaño:</b> arrastra un borde o una esquina de cualquier caja (el cursor cambia).</p>
+  <p><b>Revisado</b> <kbd>Espacio</kbd>: lo que no tocaste pasa a «ni piojo ni mosca» y avanza. <kbd>Tab</kbd> salta a la siguiente caja sin etiquetar.</p>
+  <p><b>Caja nueva:</b> <kbd>B</kbd> o el botón «＋ Caja» del menú, y arrastra sobre la imagen. <kbd>Esc</kbd> cancela.</p>
+  <p><b>Borrar un cuadro</b> (cualquiera, también los del detector): <kbd>X</kbd>, <kbd>Supr</kbd> o <kbd>Retroceso</kbd>. No se pierde: <kbd>Z</kbd> restaura el último, y el aviso junto a la caja y el menú «Foto» ofrecen «Restaurar» (también después de recargar). La evaluación cuenta un cuadro del detector borrado como falso positivo.</p>
+  <p><b>Vista:</b> arrastra en vacío o clic derecho = mover la imagen · rueda o lupas <kbd>+</kbd> <kbd>−</kbd> = zoom (con una caja seleccionada, el zoom se centra en ella) · <kbd>F</kbd>, «Ajustar» o clic en el porcentaje = ajustar.</p>
+  <p><b>Video original</b>: <kbd>V</kbd> abre/cierra. Al abrirlo se ve la <b>imagen con sus cuadros</b> y el video <b>no se reproduce solo</b>. <kbd>P</kbd> reproduce (desde 5 s antes de la foto) o pausa · <kbd>,</kbd> <kbd>.</kbd> un fotograma (<kbd>&lt;</kbd> <kbd>&gt;</kbd> diez) · la barra salta a cualquier punto · <kbd>R</kbd> o «↩ Volver a la imagen» regresa a la imagen con sus cuadros · <kbd>I</kbd> guarda el fotograma que se ve como imagen nueva · <kbd>[</kbd> <kbd>]</kbd> velocidad (0,1× a 4×) · <kbd>O</kbd> cuadros: solo en la foto / tenues / siempre · <kbd>Inicio</kbd> principio de la ventana.</p>
+  <p><b>Navegar:</b> <kbd>A</kbd>/<kbd>D</kbd> o flechas (no marcan revisado) · <kbd>S</kbd> siguiente sin revisar · <kbd>G</kbd> ir a una imagen por su número · <kbd>?</kbd> esta ayuda. Todo se guarda solo.</p>
+ </div></div></div>
+<script>
+const $=id=>document.getElementById(id),cv=$('cv'),ctx=cv.getContext('2d');
+let activeClass='louse';try{const a=localStorage.getItem('activeClass');if(a==='louse'||a==='fly')activeClass=a}catch(e){}
+let drawMode=false,frames=[],labels={},cur=0,img=new Image(),view={s:1,x:0,y:0},sel=-1,drag=null,state=null,cardHtml='';
+const key=f=>f.video+':'+f.frame;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C={null:'#e3b341',louse:'#3fb950',fly:'#b388ff',not_louse:'#f85149'},LBL={louse:'PIOJO',fly:'MOSCA',not_louse:'ni uno ni otro'},CLS={louse:'Piojo',fly:'Mosca'},SRC={motion:'mov',blob:'mancha',manual:'manual'},SRCL={motion:'Movimiento',blob:'Mancha (apariencia)',manual:'Dibujada a mano'};
+async function init(){const d=await (await fetch('/api/data')).json();frames=d.frames;labels=d.labels;
+ if(!frames.length){$('info').textContent='No hay frames. Corre scripts/build_label_set.py primero.';return}
+ const first=frames.findIndex(f=>!(labels[key(f)]||{}).reviewed);load(first<0?0:first);if(LS('player')==='1')setPlayer(true)}
+function getState(f){const k=key(f);if(!labels[k])labels[k]={reviewed:false,boxes:f.boxes.map(b=>({bbox:b.bbox.slice(),sources:b.sources,score:b.score,label:null,manual:false}))};return labels[k]}
+function load(i){undoInfo=null;cur=Math.max(0,Math.min(frames.length-1,i));const f=frames[cur];state=getState(f);sel=-1;
+ img=new Image();img.onload=()=>{fit();draw()};img.src='/img/'+f.image;updateInfo();buildList();playerLoad()}
+function save(){fetch('/api/save',{method:'POST',body:JSON.stringify({key:key(frames[cur]),state})});updateInfo();buildList()}
+// El bitmap del lienzo debe medir SIEMPRE lo mismo que su caja en pantalla (x pixel ratio); si no, el navegador lo estira y lo
+// dibujado se desfasa del ratón. Se observa el contenedor porque su alto cambia sin que cambie la ventana (carrusel, fuentes...).
+let cssW=1,cssH=1,fitted=true;
+const DPR=()=>window.devicePixelRatio||1;
+function resize(){const r=cv.parentElement.getBoundingClientRect();cssW=r.width;cssH=r.height;const d=DPR();
+ cv.width=Math.round(cssW*d);cv.height=Math.round(cssH*d);if(fitted)fit();draw()}
+function fit(){fitted=true;if(!img.width)return;view.s=Math.min(cssW/img.width,cssH/img.height);view.x=(cssW-img.width*view.s)/2;view.y=(cssH-img.height*view.s)/2}
+if(window.ResizeObserver)new ResizeObserver(()=>resize()).observe(cv.parentElement);
+// cambia la densidad de píxeles (otro monitor, zoom del navegador) sin que cambie el tamaño del contenedor
+function watchDpr(){if(typeof matchMedia!=='function')return;matchMedia(`(resolution: ${DPR()}dppx)`).addEventListener('change',()=>{resize();watchDpr()},{once:true})}
+watchDpr();
+const toImg=(px,py)=>[(px-view.x)/view.s,(py-view.y)/view.s],toScr=(x,y)=>[x*view.s+view.x,y*view.s+view.y];
+function boxTag(b){const s=b.manual?'manual':b.sources.map(x=>SRC[x]||x).join('+');return s+(b.label?' · '+LBL[b.label]:'')}
+function draw(){const r=cv.parentElement.getBoundingClientRect();
+ if(Math.abs(r.width-cssW)>0.5||Math.abs(r.height-cssH)>0.5||cv.width!==Math.round(cssW*DPR())){resize();return}   // red de seguridad: cambió el tamaño del contenedor o la densidad de píxeles
+ ctx.setTransform(DPR(),0,0,DPR(),0,0);ctx.clearRect(0,0,cssW,cssH);if(!img.width)return;
+ ctx.drawImage(useVideo()?vid:img,view.x,view.y,img.width*view.s,img.height*view.s);   // con el video abierto, ocupa el lugar de la foto con el mismo zoom y desplazamiento
+ const ba=boxAlpha();
+ state.boxes.forEach((b,i)=>{if(ba===0)return;ctx.globalAlpha=i===sel?1:ba;const[x,y]=toScr(b.bbox[0],b.bbox[1]),w=b.bbox[2]*view.s,h=b.bbox[3]*view.s,col=C[b.label];
+  ctx.lineWidth=i===sel?4:2.5;ctx.strokeStyle=col;ctx.setLineDash(b.label?[]:[7,4]);ctx.strokeRect(x,y,w,h);
+  ctx.setLineDash([]);if(i===sel){ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(x-3,y-3,w+6,h+6);}
+  if(i===sel||i===hov){ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=1;for(const[cx,cy]of[[x,y],[x+w,y],[x,y+h],[x+w,y+h],[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]]){ctx.fillRect(cx-4,cy-4,8,8);ctx.strokeRect(cx-4,cy-4,8,8)}}
+  const tag=boxTag(b);ctx.font='600 12px system-ui';const tw=ctx.measureText(tag).width+10;ctx.fillStyle='#000c';ctx.fillRect(x,y-19,tw,19);
+  ctx.fillStyle=col;ctx.fillText(tag,x+5,y-6)});
+ ctx.globalAlpha=1;
+ if(drag&&drag.mode==='box'){const[x0,y0]=toScr(drag.x0,drag.y0),[x1,y1]=toScr(drag.x1,drag.y1);ctx.strokeStyle='#4cc9f0';ctx.lineWidth=2;ctx.strokeRect(x0,y0,x1-x0,y1-y0)}
+ $('zoom').textContent=Math.round(view.s*100)+' %';updateCard()}
+function hit(px,py){if(!boxesActive())return -1;const[x,y]=toImg(px,py);let best=-1,ba=1e18;state.boxes.forEach((b,i)=>{if(x>=b.bbox[0]&&x<=b.bbox[0]+b.bbox[2]&&y>=b.bbox[1]&&y<=b.bbox[1]+b.bbox[3]){const a=b.bbox[2]*b.bbox[3];if(a<ba){ba=a;best=i}}});return best}
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+const TOL=10;
+// Asas de redimensión de CUALQUIER caja. Esquina = zona cuadrada alrededor de cada vértice (siempre mueve los dos ejes);
+// borde = franja a lo largo de un lado, lejos de las esquinas (mueve un eje). Las zonas se achican en cajas chicas
+// para no tapar su interior, que sirve para moverlas.
+function handleAt(px,py){let best=null;if(!boxesActive())return null;
+ const R=state.boxes.map((b,i)=>{const[x0,y0]=toScr(b.bbox[0],b.bbox[1]),x1=x0+b.bbox[2]*view.s,y1=y0+b.bbox[3]*view.s;return{i,x0,y0,x1,y1,m:Math.min(x1-x0,y1-y0)}});
+ for(const r of R){const ct=Math.max(7,Math.min(18,0.4*r.m)),sb=r.i===sel?0.5:0;
+  for(const[cx,cy,l,t]of[[r.x0,r.y0,1,1],[r.x1,r.y0,0,1],[r.x0,r.y1,1,0],[r.x1,r.y1,0,0]]){const d=Math.max(Math.abs(px-cx),Math.abs(py-cy))-sb;
+   if(d<=ct&&(!best||d<best.d))best={idx:r.i,d,corner:true,left:!!l,right:!l,top:!!t,bottom:!t}}}
+ if(best)return best;
+ for(const r of R){const et=Math.max(4,Math.min(TOL,0.3*r.m));
+  if(px<r.x0-et||px>r.x1+et||py<r.y0-et||py>r.y1+et)continue;
+  const dl=Math.abs(px-r.x0),dr=Math.abs(px-r.x1),dt=Math.abs(py-r.y0),db=Math.abs(py-r.y1),L=dl<=et,Rr=dr<=et,T=dt<=et,B=db<=et;
+  if(!(L||Rr||T||B))continue;
+  const d=Math.min(L?dl:1e9,Rr?dr:1e9,T?dt:1e9,B?db:1e9)-(r.i===sel?0.5:0);
+  if(!best||d<best.d)best={idx:r.i,d,corner:false,left:L&&(!Rr||dl<=dr),right:Rr&&(!L||dr<dl),top:T&&(!B||dt<=db),bottom:B&&(!T||db<dt)}}
+ return best}
+function cursorAt(px,py){if(drawMode)return 'crosshair';const h=handleAt(px,py);
+ if(h){if((h.left&&h.top)||(h.right&&h.bottom))return 'nwse-resize';if((h.right&&h.top)||(h.left&&h.bottom))return 'nesw-resize';return(h.left||h.right)?'ew-resize':'ns-resize'}
+ return hit(px,py)>=0?'move':'grab'}
+let hov=-1;
+cv.addEventListener('mousemove',e=>{if(drag)return;if(cv.width!==Math.round(cssW*DPR())){resize()}   // cambió la densidad de píxeles
+ const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+ cv.style.cursor=cursorAt(px,py);const h=handleAt(px,py),n=h?h.idx:hit(px,py);if(n!==hov){hov=n;draw()}});
+cv.addEventListener('mousedown',e=>{const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+ if(e.button===2||e.shiftKey){drag={mode:'pan',px,py,vx:view.x,vy:view.y};return}
+ if(drawMode){const[x,y]=toImg(px,py);drag={mode:'box',x0:x,y0:y,x1:x,y1:y};sel=-1;return}   // con B armado se dibuja, aunque el clic caiga sobre otra caja
+ const hd=handleAt(px,py);
+ if(hd){sel=hd.idx;const b=state.boxes[sel];
+  const o=b.bbox,[ix,iy]=toImg(px,py);
+  drag={mode:'resize',idx:sel,left:hd.left,right:hd.right,top:hd.top,bottom:hd.bottom,b0:o.slice(),moved:false,dirty:false,
+   ox:(hd.left||hd.right)?ix-(hd.left?o[0]:o[0]+o[2]):0,oy:(hd.top||hd.bottom)?iy-(hd.top?o[1]:o[1]+o[3]):0};
+  if(b.label!==activeClass){b.label=activeClass;drag.dirty=true}draw();return}                // agarrar una caja = clase activa
+ const h=hit(px,py);
+ if(h>=0){sel=h;const b=state.boxes[h];const[x,y]=toImg(px,py);
+  drag={mode:'move',idx:h,mx:x,my:y,bx:b.bbox[0],by:b.bbox[1],px,py,moved:false};   // presionar = clase activa
+  if(b.label!==activeClass){b.label=activeClass;drag.dirty=true}draw();return}
+ drag={mode:'pan',px,py,vx:view.x,vy:view.y,moved:false,empty:true};cv.style.cursor='grabbing'});
+window.addEventListener('mousemove',e=>{if(!drag)return;const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+ if(drag.mode==='pan'){if(Math.hypot(px-drag.px,py-drag.py)>3){drag.moved=true;fitted=false}view.x=drag.vx+px-drag.px;view.y=drag.vy+py-drag.py}
+ else if(drag.mode==='move'){if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<4)return;drag.moved=true;const[x,y]=toImg(px,py),b=state.boxes[drag.idx];
+  if(!b.bbox0)b.bbox0=b.bbox.slice();b.bbox[0]=Math.round(drag.bx+x-drag.mx);b.bbox[1]=Math.round(drag.by+y-drag.my)}
+ else if(drag.mode==='resize'){const[ix,iy]=toImg(px,py),x=ix-drag.ox,y=iy-drag.oy,b=state.boxes[drag.idx],o=drag.b0;let x0=o[0],x1=o[0]+o[2],y0=o[1],y1=o[1]+o[3];
+  if(drag.left)x0=x;if(drag.right)x1=x;if(drag.top)y0=y;if(drag.bottom)y1=y;
+  if(!b.bbox0)b.bbox0=o.slice();drag.moved=true;
+  b.bbox=[Math.round(Math.min(x0,x1)),Math.round(Math.min(y0,y1)),Math.max(8,Math.round(Math.abs(x1-x0))),Math.max(8,Math.round(Math.abs(y1-y0)))]}
+ else{[drag.x1,drag.y1]=toImg(px,py)}draw()});
+window.addEventListener('mouseup',()=>{if(!drag)return;
+ if(drag.mode==='box'){const x=Math.min(drag.x0,drag.x1),y=Math.min(drag.y0,drag.y1),w=Math.abs(drag.x1-drag.x0),h=Math.abs(drag.y1-drag.y0);
+  if(w>8&&h>8){state.boxes.push({bbox:[Math.round(x),Math.round(y),Math.round(w),Math.round(h)],sources:['manual'],score:0,label:activeClass,manual:true});sel=state.boxes.length-1;save()}
+  setDraw(false)}
+ else if(drag.mode==='pan'){if(drag.empty&&!drag.moved)sel=-1;setCursor()}
+ else if(drag.mode==='move'){if(drag.moved||drag.dirty)save()}
+ else if(drag.mode==='resize'){if(drag.moved||drag.dirty)save()}
+ drag=null;draw()});
+cv.addEventListener('wheel',e=>{e.preventDefault();const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top,[x,y]=toImg(px,py),k=e.deltaY<0?1.2:1/1.2;
+ view.s=Math.max(0.05,Math.min(20,view.s*k));view.x=px-x*view.s;view.y=py-y*view.s;fitted=false;draw()},{passive:false});
+function zoomBy(k){if(!img.width)return;let ax=cssW/2,ay=cssH/2;   // ancla: la caja seleccionada si se ve; si no, el centro
+ if(sel>=0&&state&&state.boxes[sel]){const b=state.boxes[sel].bbox,[cx,cy]=toScr(b[0]+b[2]/2,b[1]+b[3]/2);if(cx>0&&cx<cssW&&cy>0&&cy<cssH){ax=cx;ay=cy}}
+ const[ix,iy]=toImg(ax,ay);view.s=Math.max(0.05,Math.min(20,view.s*k));view.x=ax-ix*view.s;view.y=ay-iy*view.s;fitted=false;draw()}
+function setCursor(){cv.style.cursor=drawMode?'crosshair':'grab'}
+function setDraw(v){drawMode=v;setCursor();const m=$('mode'),cn=CLS[activeClass];m.className='sx chip'+(drawMode?' draw':'');$('bbox').className=drawMode?'on':'';
+ m.textContent=drawMode?'Dibujando · Esc':'Mover';draw()}
+function setClass(c){activeClass=c;try{localStorage.setItem('activeClass',c)}catch(e){}
+ $('clsL').className=c==='louse'?'on':'';$('clsF').className=c==='fly'?'on':'';setDraw(drawMode)}
+function toggleSel(){if(sel<0)return;const b=state.boxes[sel];setLabel(b.label==='louse'?'fly':b.label==='fly'?'louse':activeClass)}
+function setLabel(l){if(sel<0)return;state.boxes[sel].label=l;save();draw()}
+// Borrar = sacar el cuadro de state.boxes y guardarlo en state.deleted (labels.json): no se pierde y se puede restaurar. Como export y
+// evaluación solo miran state.boxes, el cuadro borrado deja de contar como etiqueta; la evaluación lo cuenta como falso positivo del detector.
+function delSel(){if(sel<0||!state||!state.boxes[sel])return;
+ if(!boxesActive()){vmsg('Los cuadros solo se pueden editar en el fotograma de la foto (tecla R).');return}
+ const b=state.boxes.splice(sel,1)[0];(state.deleted=state.deleted||[]).push(b);sel=-1;undoInfo={bbox:b.bbox.slice(),until:Date.now()+10000};clearTimeout(undoTimer);undoTimer=setTimeout(draw,10100);save();draw();
+ vmsg(`Cuadro borrado. Z o «Restaurar» lo recuperan (${state.deleted.length} borrado${state.deleted.length>1?'s':''} en esta imagen).`,false,true)}
+function restoreBox(all){if(!state||!(state.deleted||[]).length)return;undoInfo=null;
+ if(all){state.boxes.push(...state.deleted);state.deleted=[];sel=-1}else{state.boxes.push(state.deleted.pop());sel=state.boxes.length-1}
+ save();draw()}
+function resetPos(){if(sel>=0&&state.boxes[sel].bbox0){state.boxes[sel].bbox=state.boxes[sel].bbox0.slice();delete state.boxes[sel].bbox0;save();draw()}}
+function nextUnl(){const n=state.boxes.length;for(let k=1;k<=n;k++){const i=(sel+k+n)%n;if(!state.boxes[i].label&&!state.boxes[i].manual){sel=i;draw();return}}}
+function markRev(){state.boxes.forEach(b=>{if(!b.label)b.label='not_louse'});state.reviewed=true;save();draw();if(cur<frames.length-1)load(cur+1)}
+function skipPending(){const n=frames.length;for(let k=1;k<=n;k++){const i=(cur+k)%n;if(!(labels[key(frames[i])]||{}).reviewed){load(i);return}}}
+function setHelp(v){$('helpm').hidden=!v}
+$('helpbtn').onclick=()=>setHelp(true);$('helpx').onclick=()=>setHelp(false);$('helpm').onclick=e=>{if(e.target.id==='helpm')setHelp(false)};
+$('rrlast').onclick=()=>restoreBox(false);$('rrall').onclick=()=>restoreBox(true);
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+ if(!$('helpm').hidden){if(k==='escape'||k==='?')setHelp(false);return}
+ if(k==='?'){setHelp(true);return}
+ if(k==='b'){setDraw(!drawMode)}else if(k==='escape'){setDraw(false)}
+ else if(k==='l')setLabel('louse');else if(k==='m')setLabel('fly');else if(k==='t')toggleSel();
+ else if(k==='n')setLabel('not_louse');else if(k==='u')setLabel(null);
+ else if(k==='1')setClass('louse');else if(k==='2')setClass('fly');
+ else if(k==='tab'){e.preventDefault();nextUnl()}
+ else if((k==='x'||k==='delete'||k==='backspace')&&sel>=0){e.preventDefault();delSel()}
+ else if(k==='z'){restoreBox(false)}
+ else if(k==='+'||k==='=')zoomBy(1.25);else if(k==='-'||k==='_')zoomBy(1/1.25);
+ else if(k==='f'){fit();draw()}else if(k==='d'||k==='arrowright')load(cur+1);else if(k==='a'||k==='arrowleft')load(cur-1);
+ else if(k==='s')skipPending();
+ else if(k==='v')setPlayer(!P.open);else if(k==='i')vsave();else if(k==='p')vtoggle();else if(k==='r')vback();else if(k==='home')vstart();
+ else if(k==='[')rateStep(-1);else if(k===']')rateStep(1);else if(k==='o'&&P.open)setBoxes(BOXMODES[(BOXMODES.indexOf(P.boxes)+1)%BOXMODES.length]);
+ else if(k===','||k==='.')vstep(k==='.'?1:-1);else if(k==='<'||k==='>')vstep(k==='>'?10:-10);
+ else if(k==='g'){e.preventDefault();$('goto').focus();$('goto').select()}
+ else if(k===' '){e.preventDefault();markRev()}});
+$('zin').onclick=()=>zoomBy(1.25);$('zout').onclick=()=>zoomBy(1/1.25);$('zoom').onclick=()=>{fit();draw()};
+$('clsL').onclick=()=>setClass('louse');$('clsF').onclick=()=>setClass('fly');
+$('prev').onclick=()=>load(cur-1);$('next').onclick=()=>load(cur+1);$('rev').onclick=markRev;$('skip').onclick=skipPending;
+$('sl').onclick=()=>$('strip').scrollBy({left:-480});$('sr').onclick=()=>$('strip').scrollBy({left:480});$('pend').onchange=buildList;
+function counts(s){let L=0,F=0,N=0,M=0,U=0;s.boxes.forEach(b=>{if(b.label==='louse')L++;else if(b.label==='fly')F++;else if(b.label==='not_louse')N++;else U++;if(b.manual)M++});return{L,F,N,M,U}}
+function updateInfo(){const f=frames[cur],rev=Object.values(labels).filter(s=>s.reviewed).length;
+ $('info').innerHTML=`<b>${f.video.slice(4)}</b> · frame ${f.frame} · t=${f.t} s`;$('ntotal').textContent=frames.length;if(document.activeElement!==$('goto'))$('goto').value=cur+1;
+ $('bar').style.width=(100*rev/frames.length)+'%';$('pcount').textContent=`${rev} / ${frames.length} revisadas`;
+ const c=counts(state);$('cU').textContent=c.U;$('cL').textContent=c.L;$('cF').textContent=c.F;$('cN').textContent=c.N;
+ let L=0,F=0,N=0,M=0,U=0,D=0;Object.values(labels).forEach(s=>{const k=counts(s);L+=k.L;F+=k.F;N+=k.N;M+=k.M;U+=k.U;D+=(s.deleted||[]).length});
+ $('stats').innerHTML=`<span>Piojos</span><span>${L}</span><span>Moscas</span><span>${F}</span><span>Ni piojo ni mosca</span><span>${N}</span><span>Dibujadas a mano</span><span>${M}</span><span>Sin etiquetar</span><span>${U}</span><span>Cuadros borrados</span><span>${D}</span>`}
+// Controles de etiquetado: un panel FLOTANTE sobre la imagen, junto a la caja seleccionada (y, tras borrar, un aviso para restaurar).
+let undoInfo=null,undoTimer=0;
+function popPlace(p,bx,by,bw,bh){   // arriba de la caja (deja visible su etiqueta), si no abajo, a la derecha o a la izquierda; dentro del lienzo y tapando lo menos posible las otras cajas
+ const pw=p.offsetWidth||252,ph=p.offsetHeight||130,m=6,gap=24;
+ const others=(state?state.boxes:[]).map((b,i)=>i===sel?null:toScr(b.bbox[0],b.bbox[1]).concat([b.bbox[2]*view.s,b.bbox[3]*view.s])).filter(Boolean);
+ const cover=(x,y)=>others.reduce((a,[ox,oy,ow,oh])=>a+Math.max(0,Math.min(x+pw,ox+ow)-Math.max(x,ox))*Math.max(0,Math.min(y+ph,oy+oh)-Math.max(y,oy)),0);
+ const c=[[bx,by-ph-gap],[bx,by+bh+m],[bx+bw+m,by],[bx-pw-m,by],[bx+bw-pw,by+bh+m],[bx+bw-pw,by-ph-gap],[bx+bw+m,by+bh-ph],[bx-pw-m,by+bh-ph]];
+ let best=null,bs=1e18;
+ for(const[x,y]of c){const cx=Math.min(Math.max(x,m),cssW-pw-m),cy=Math.min(Math.max(y,m),cssH-ph-m),fit=Math.abs(cx-x)<1&&Math.abs(cy-y)<1;
+  const sc=cover(cx,cy)+(fit?0:1e9);if(sc<bs){bs=sc;best=[cx,cy]}}
+ p.style.left=best[0]+'px';p.style.top=best[1]+'px'}
+function updateRestore(){const n=state?(state.deleted||[]).length:0;$('restoreRow').hidden=!n;if(n)$('rtext').textContent=`${n} cuadro${n>1?'s':''} borrado${n>1?'s':''} en esta imagen`}
+function updateCard(){
+ const p=$('pop');updateRestore();
+ if(!state||drag||!img.width){p.hidden=true;return}                                   // mientras se arrastra no tapa nada
+ let h=null,anc=null;const nb='onmousedown="event.preventDefault()"';
+ if(sel>=0&&state.boxes[sel]&&boxesActive()){
+  const b=state.boxes[sel],st=b.label==='louse'?['Piojo','--ok']:b.label==='fly'?['Mosca','--fly']:b.label==='not_louse'?['Ni piojo ni mosca','--bad']:['Sin etiquetar','--unl'];
+  const srcs=(b.manual?['manual']:b.sources).map(x=>SRCL[x]||x).join(' + '),on=l=>b.label===l?' class="on"':'';anc=b.bbox;
+  h=`<div class="ph"><span class="badge" style="color:var(${st[1]});border-color:var(${st[1]})">${st[0]}</span><span class="pk">${srcs}${b.manual?'':' · puntaje '+(+b.score).toFixed(1)}</span></div>
+  <div class="pk">${b.bbox[2]} × ${b.bbox[3]} px${b.bbox0?' · movida':''}</div>
+  <div class="pb"><button${on('louse')} title="Piojo (L)" onclick="setLabel('louse')" ${nb}>Piojo <kbd>L</kbd></button><button${on('fly')} title="Mosca (M)" onclick="setLabel('fly')" ${nb}>Mosca <kbd>M</kbd></button><button${on('not_louse')} title="Ni piojo ni mosca (N)" onclick="setLabel('not_louse')" ${nb}>Ni uno <kbd>N</kbd></button></div>
+  <div class="pb"><button title="Cambiar piojo ⇄ mosca (T)" onclick="toggleSel()" ${nb}>⇄ <kbd>T</kbd></button><button title="Quitar etiqueta (U)" onclick="setLabel(null)" ${nb}>Quitar <kbd>U</kbd></button><button title="Borrar caja (X)" onclick="delSel()" ${nb}>Borrar <kbd>X</kbd></button></div>
+  ${b.bbox0?`<button title="Volver a la posición original" onclick="resetPos()" ${nb}>↩ Posición original</button>`:''}`}
+ else if(sel<0&&undoInfo&&Date.now()<undoInfo.until&&(state.deleted||[]).length){
+  anc=undoInfo.bbox;const n=state.deleted.length;
+  h=`<div class="ph"><b>Cuadro borrado</b><span class="pk">${n} en esta imagen</span></div>
+  <div class="pb2"><button title="Restaurar el último (Z)" onclick="restoreBox(false)" ${nb}>Restaurar <kbd>Z</kbd></button><button title="Restaurar todos los borrados de esta imagen" onclick="restoreBox(true)" ${nb}>Restaurar todos</button></div>`}
+ if(h===null){p.hidden=true;return}
+ if(h!==cardHtml){cardHtml=h;p.innerHTML=h}
+ p.hidden=false;const[bx,by]=toScr(anc[0],anc[1]);popPlace(p,bx,by,anc[2]*view.s,anc[3]*view.s)}
+function buildList(){const only=$('pend').checked,idx=[];
+ frames.forEach((f,i)=>{const s=labels[key(f)];if(only&&s&&s.reviewed&&i!==cur)return;idx.push(i)});
+ const pos=Math.max(0,idx.indexOf(cur)),lo=Math.max(0,pos-40),hi=Math.min(idx.length,pos+60);   // ventana: con miles de imágenes no se dibujan todas
+ const th=i=>{const f=frames[i],s=labels[key(f)],rev=s&&s.reviewed,c=counts(s||{boxes:f.boxes.map(()=>({label:null,manual:false}))}),n=c.L,nf=c.F;
+  return`<div class="th${i===cur?' cur':''}${rev?' rev':''}" onclick="load(${i})" title="${f.video.slice(4)} · frame ${f.frame}${f.stratum?' · '+f.stratum:''}"><img loading="lazy" src="/thumb/${f.image}"><span class="i">${i+1}</span>${rev?'<span class="ck">✓</span>':''}${f.origin==='reproductor'?'<span class="vb" title="Tomada del video">▶ video</span>':''}<span class="c">${n?`<span class="l">${n} piojo${n>1?'s':''}</span>`:''}${nf?`<span class="f">${nf} mosca${nf>1?'s':''}</span>`:''}</span></div>`};
+ $('strip').innerHTML=(lo>0?`<div class="more">‹ ${lo}<br>antes</div>`:'')+idx.slice(lo,hi).map(th).join('')+(hi<idx.length?`<div class="more">${idx.length-hi}<br>más ›</div>`:'');
+ const c=$('strip').querySelector('.cur');if(c)c.scrollIntoView({inline:'center',block:'nearest',behavior:'instant'})}
+function goto_(){const n=parseInt($('goto').value);if(!isNaN(n))load(Math.max(1,Math.min(frames.length,n))-1)}
+$('goto').onkeydown=e=>{e.stopPropagation();if(e.key==='Enter'){goto_();e.target.blur()}else if(e.key==='Escape'){e.target.blur()}};
+$('gobtn').onclick=goto_;
+
+// ---------- Video original EN EL LIENZO: ventana de 5 s antes a 5 s después del instante t de la foto ----------
+// Dos vistas: «foto» (la imagen con sus cuadros: es lo que se ve al abrir) y «video» (se dibuja el fotograma del video en el mismo lugar, con el
+// mismo zoom y desplazamiento). NUNCA se reproduce solo: se pasa a «video» al reproducir, mover la barra o avanzar fotogramas, y el botón
+// «Volver a la imagen» (R) regresa a la foto. El archivo de video no se pide al servidor hasta que se necesita.
+// Para mostrar un fotograma exacto se busca la mitad de su intervalo (justo en t puede salir el anterior o el siguiente).
+const vid=$('vid');
+const SPEEDS=[0.1,0.25,0.5,0.75,1,1.5,2,3,4],BOXMODES=['hide','dim','full'],BOXLBL={hide:'solo en la foto',dim:'tenues',full:'siempre'};
+const P={open:false,view:'foto',name:null,info:{},f:null,start:0,end:0,t:0,dt:1/30,media:null,tok:0,pts:[],it:0,i0:0,i1:0,pend:null,ready:false,vready:false,at:true,boxes:'hide',rate:1,hidden:false};
+function LS(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+const fmtT=s=>(s<0?'−':'')+Math.floor(Math.abs(s)/60)+':'+(Math.abs(s)%60).toFixed(2).padStart(5,'0').replace('.',',')
+const fmtR=s=>(s>0?'+':s<0?'−':'')+Math.abs(s).toFixed(2).replace('.',',')+' s';
+// Marcas de tiempo reales de los fotogramas de la ventana (si el servidor no las da, se sintetizan con 1/fps alrededor de t).
+function pidx(t){const a=P.pts;if(!a.length)return -1;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(a[m]<=t+1e-4)lo=m;else hi=m-1}return lo}   // fotograma que se muestra en el instante t
+function pmid(i){const a=P.pts,nx=a[i+1]!==undefined?a[i+1]:a[i]+P.dt;return a[i]+0.5*(nx-a[i])}                                                      // mitad del intervalo del fotograma i
+function useVideo(){return P.open&&P.view==='video'&&P.vready&&vid.readyState>=2&&vid.videoHeight>0&&img.width>0&&Math.abs(vid.videoWidth/vid.videoHeight-img.width/img.height)<0.02}
+function boxAlpha(){if(!P.open||P.view==='foto'||P.at)return 1;return P.boxes==='hide'?0:P.boxes==='dim'?0.4:1}
+// En la vista «foto» y en el fotograma de la foto los cuadros se ven y se editan; fuera de él (por defecto) ni se dibujan ni reaccionan al ratón.
+function boxesActive(){return !P.open||P.view==='foto'||P.at||P.boxes!=='hide'}
+let msgTimer=0;
+function vmsg(t,sticky,ok){const m=$('vmsg');m.hidden=!t;m.textContent=t||'';m.className='msg'+(ok?' ok':'');clearTimeout(msgTimer);if(t&&!sticky)msgTimer=setTimeout(()=>{m.hidden=true},4000)}
+function vseek(t){return new Promise(res=>{let done=false;const fin=()=>{if(!done){done=true;vid.removeEventListener('seeked',fin);res()}};vid.addEventListener('seeked',fin);setTimeout(fin,4000);vid.currentTime=t})}
+async function vinfo(name){if(!(name in P.info)){try{const r=await fetch('/api/video_info?name='+encodeURIComponent(name));P.info[name]=r.ok?await r.json():null}catch(e){P.info[name]=null}}return P.info[name]}
+function setRate(r){P.rate=r;vid.defaultPlaybackRate=r;vid.playbackRate=r;$('vrate').value=String(r);$('vspd').textContent=String(r).replace('.',',')+'×';LS('vrate',String(r))}
+function rateStep(d){let i=SPEEDS.indexOf(P.rate);if(i<0)i=SPEEDS.indexOf(1);setRate(SPEEDS[Math.min(Math.max(i+d,0),SPEEDS.length-1)])}
+// Calcula la ventana y las marcas de tiempo de la foto actual. NO toca el video: la vista inicial es la foto, quieta, con sus cuadros.
+async function playerLoad(){
+ if(!P.open||!frames.length)return;const f=frames[cur],tok=++P.tok;P.f=f;P.media=null;P.pend=null;P.ready=false;P.vready=false;P.view='foto';P.at=true;vid.pause();vui();
+ if(typeof f.t!=='number'){vmsg('Esta foto no tiene guardado el instante t del video.',true);return}
+ const inf=await vinfo(f.video);if(tok!==P.tok)return;
+ if(!inf){vmsg('No se encontró el video original de esta foto.',true);return}
+ vmsg('');P.dt=1/inf.fps;P.t=f.t;P.start=Math.max(0,f.t-5);P.end=Math.min(inf.dur,f.t+5);
+ let pts=[];try{const r=await fetch(`/api/video_pts?name=${encodeURIComponent(f.video)}&a=${P.start-1}&b=${P.end+1}`);if(r.ok)pts=(await r.json()).pts}catch(e){}
+ if(tok!==P.tok)return;
+ if(!pts.length){const K=Math.ceil(6/P.dt);for(let k=-K;k<=K;k++)pts.push(f.t+k*P.dt)}            // sin PTS: se supone tasa constante
+ P.pts=pts;let bi=0;pts.forEach((x,i)=>{if(Math.abs(x-P.t)<Math.abs(pts[bi]-P.t))bi=i});P.it=bi;       // fotograma de la foto
+ P.i0=0;while(P.i0<pts.length-1&&pts[P.i0]<P.start-1e-4)P.i0++;P.i1=Math.max(P.i0,pidx(P.end));
+ $('vwin').textContent=`ventana ${fmtT(P.start)} – ${fmtT(P.end)} · foto en ${fmtT(P.t)}`;$('vseek').title=$('vwin').textContent;
+ const m=$('vmark');m.style.left=`calc(${(100*(P.t-P.start)/(P.end-P.start)).toFixed(2)}% - 1px)`;
+ P.ready=true;vui()}
+// Carga el archivo de video (solo la primera vez que se necesita) y comprueba que tenga la proporción de la foto.
+async function ensureVideo(){
+ if(!P.open||!P.ready)return false;const tok=P.tok;
+ if(P.name!==P.f.video){P.name=P.f.video;P.vready=false;
+  const ok=await new Promise(res=>{vid.onloadedmetadata=()=>res(true);vid.onerror=()=>res(false);vid.src='/video/'+encodeURIComponent(P.f.video)});
+  if(tok!==P.tok)return false;if(!ok){P.name=null;vmsg('El navegador no pudo abrir el video (¿códec no compatible?).',true);return false}}
+ if(!(Math.abs(vid.videoWidth/vid.videoHeight-P.f.w/P.f.h)<0.02)){vmsg('El video tiene otra proporción que la foto: no se puede mostrar sobre ella.',true);return false}
+ vid.playbackRate=P.rate;P.vready=true;return true}
+async function showVideoAt(i){if(!P.open||!P.ready)return false;vid.pause();P.pend=null;if(!(await ensureVideo()))return false;P.view='video';await vseek(pmid(i));vui();return true}
+function vui(){   // actualiza barra, marcas y vuelve a dibujar el lienzo
+ const st=$('vstat');st.hidden=!P.open;
+ if(!P.open||!(P.end>P.start)){if(P.open){st.textContent=P.view==='foto'?'IMAGEN':'VIDEO';st.className='sx chip'}draw();return}
+ $('vsnap').className=P.view==='foto'?'on':'';
+ if(P.view==='foto'){   // la imagen con sus cuadros; el video queda quieto
+  P.at=true;$('vseek').value=Math.round(1000*(P.t-P.start)/(P.end-P.start));$('vnow').textContent='t = '+fmtT(P.t);$('vrel').textContent='FOTO';$('vplay').textContent='▶';
+  st.textContent='IMAGEN · FOTO';st.className='sx chip ok';draw();return}
+ const el=vid.currentTime,t=P.media!=null?P.media:el;
+ if(!vid.paused&&el>=P.end-0.5*P.dt){if($('vloop').checked)vid.currentTime=pmid(P.i0);else{vid.pause();vid.currentTime=Math.max(pmid(P.i1),P.start)}}
+ $('vseek').value=Math.round(1000*(Math.min(Math.max(el,P.start),P.end)-P.start)/(P.end-P.start));
+ const ci=pidx(t),rel=(P.pts[ci]!==undefined?P.pts[ci]:t)-P.t;P.at=ci===P.it;
+ $('vnow').textContent='t = '+fmtT(t);$('vrel').textContent=P.at?'FOTO':fmtR(rel);$('vplay').textContent=vid.paused?'▶':'⏸';
+ st.textContent=P.at?'VIDEO · FOTO':'VIDEO · '+fmtR(rel);st.className=P.at?'sx chip ok':'sx chip';
+ draw()}
+function vframe(now,meta){P.media=meta.mediaTime;if(P.pend!==null&&pidx(meta.mediaTime)===P.pend)P.pend=null;vui();vid.requestVideoFrameCallback(vframe)}
+if(vid.requestVideoFrameCallback)vid.requestVideoFrameCallback(vframe);
+vid.addEventListener('timeupdate',()=>{if(!vid.requestVideoFrameCallback){P.media=null;vui()}});
+vid.addEventListener('ended',()=>{if(P.open&&P.view==='video'&&$('vloop').checked){vid.currentTime=pmid(P.i0);vid.play().catch(()=>{})}});   // la ventana llega al final del archivo
+vid.addEventListener('play',vui);vid.addEventListener('pause',vui);vid.addEventListener('seeked',vui);
+// Los pasos se acumulan sobre el fotograma DESTINO pendiente (P.pend): con pulsaciones rápidas o la tecla apretada, P.media aún no se actualizó.
+// Desde la vista «foto» el primer paso parte del fotograma de la foto.
+async function vstep(n){if(!P.open||!P.ready)return;vid.pause();
+ const base=P.pend!==null?P.pend:(P.view==='foto'?P.it:pidx(P.media!=null?P.media:vid.currentTime)),j=Math.min(Math.max(base+n,P.i0),P.i1);P.pend=j;
+ if(!(await ensureVideo()))return;P.view='video';await vseek(pmid(j));setTimeout(()=>{if(P.pend===j)P.pend=null},150);vui()}
+function vback(){if(!P.open)return;vid.pause();P.pend=null;P.view='foto';P.at=true;vui()}   // vuelve a la imagen con sus cuadros
+function vstart(){showVideoAt(P.i0)}
+// Reproducir: desde la vista «foto» arranca 5 s antes del instante de la foto; con el video en pausa continúa donde estaba.
+async function vtoggle(){if(!P.open||!P.ready)return;
+ if(P.view==='video'&&!vid.paused){vid.pause();return}
+ if(P.view==='foto'){if(!(await showVideoAt(P.i0)))return}
+ else if(vid.currentTime>=P.end-1.5*P.dt)await vseek(pmid(P.i0));
+ vid.play().catch(()=>{})}
+// Guarda como imagen nueva el fotograma que se ve (el servidor lo extrae del video ORIGINAL con su instante exacto y lo inserta
+// justo después de la foto de origen). Si ese fotograma ya es una foto del conjunto, no se duplica.
+async function vsave(){
+ if(!P.open||!P.ready||!(P.end>P.start)){vmsg('Abre el video y elige un fotograma antes de guardar.');return}
+ vid.pause();const ci=P.view==='foto'?P.it:(P.pend!==null?P.pend:pidx(P.media!=null?P.media:vid.currentTime)),t=P.pts[ci];if(t===undefined)return;
+ const b=$('vsave');b.disabled=true;const curKey=key(frames[cur]);
+ try{const r=await fetch('/api/snapshot',{method:'POST',body:JSON.stringify({video:P.f.video,t:t,after_key:curKey})}),d=await r.json();
+  if(!r.ok){vmsg('No se pudo guardar: '+(d.error||r.status));return}
+  if(d.existing){vmsg(`Ese fotograma ya es la imagen #${d.index+1} del conjunto.`);return}
+  frames.splice(d.index,0,d.frame);cur=Math.max(0,frames.findIndex(f=>key(f)===curKey));buildList();updateInfo();
+  vmsg(`Instantánea guardada como imagen #${d.index+1} (t = ${fmtT(d.frame.t)}): aparece justo después de esta en el carrusel.`,false,true)}
+ catch(e){vmsg('No se pudo guardar la instantánea.')}finally{b.disabled=false}}
+function setBoxes(m){P.boxes=m;LS('vboxes',m);$('vboxes').textContent='Cuadros: '+BOXLBL[m];draw()}
+function setPlayer(open){P.open=open;P.view='foto';LS('player',open?'1':'0');$('vbtn').className='full'+(open?' on':'');$('vbtn').innerHTML=open?'× Cerrar video <kbd>V</kbd>':'▶ Video ±5 s <kbd>V</kbd>';$('vctrl').hidden=!open;
+ if(open)playerLoad();else{P.tok++;vid.pause();P.ready=false;P.vready=false;vmsg('');vui()}}
+$('vbtn').onclick=()=>setPlayer(!P.open);$('zfit').onclick=()=>{fit();draw()};$('bbox').onclick=()=>setDraw(!drawMode);
+$('vplay').onclick=vtoggle;$('vm1').onclick=()=>vstep(-1);$('vp1').onclick=()=>vstep(1);$('vm10').onclick=()=>vstep(-10);$('vp10').onclick=()=>vstep(10);
+$('vsnap').onclick=vback;$('vsave').onclick=vsave;$('vstart').onclick=vstart;
+$('vslow').onclick=()=>rateStep(-1);$('vfast').onclick=()=>rateStep(1);
+$('vboxes').onclick=()=>setBoxes(BOXMODES[(BOXMODES.indexOf(P.boxes)+1)%BOXMODES.length]);
+$('vseek').oninput=async e=>{if(!P.open||!P.ready||!(P.end>P.start))return;vid.pause();const v=e.target.value;if(!(await ensureVideo()))return;P.view='video';P.pend=null;vseek(P.start+(P.end-P.start)*v/1000)};
+$('vseek').onchange=e=>e.target.blur();
+$('vrate').onchange=e=>{setRate(parseFloat(e.target.value)||1);e.target.blur()};
+$('vloop').onchange=e=>{LS('vloop',e.target.checked?'1':'0');e.target.blur()};
+if(LS('vloop'))$('vloop').checked=LS('vloop')==='1';
+if(SPEEDS.includes(parseFloat(LS('vrate'))))setRate(parseFloat(LS('vrate')));else setRate(1);
+setBoxes(BOXMODES.includes(LS('vboxes'))?LS('vboxes'):'hide');
+document.querySelectorAll('details.sec').forEach(d=>{const v=LS('sec_'+d.id);if(v==='1')d.open=true;else if(v==='0')d.open=false;d.addEventListener('toggle',()=>LS('sec_'+d.id,d.open?'1':'0'))});
+window.addEventListener('resize',resize);resize();setClass(activeClass);init();
+</script></body></html>

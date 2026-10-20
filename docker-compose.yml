@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: labelhub-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: labelhub
+      POSTGRES_PASSWORD: ${LABELHUB_DB_PASSWORD:-labelhub_dev}
+      POSTGRES_DB: labelhub
+    ports:
+      - "127.0.0.1:${LABELHUB_DB_PORT:-55433}:5432"
+    volumes:
+      - labelhub_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labelhub -d labelhub"]
+      interval: 5s
+      retries: 10
+volumes:
+  labelhub_pgdata:

@@ -1,0 +1,35 @@
+[project]
+name = "labelhub"
+version = "0.1.0"
+description = "Plataforma multiusuario de etiquetado, entrenamiento y detección en vivo"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115,<0.120",
+  "uvicorn[standard]",
+  "sqlalchemy>=2.0,<2.1",
+  "alembic",
+  "psycopg2-binary",
+  "pydantic-settings",
+  "itsdangerous",
+  "python-multipart",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = ["B008"]   # Depends() en los argumentos es el patrón de FastAPI
+select = ["E", "F", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+"../workers/*" = ["E501"]   # comentarios largos en español
