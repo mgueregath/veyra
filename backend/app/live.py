@@ -12,8 +12,9 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from . import remote
 from .config import settings
 from .db import SessionLocal
 from .models import LiveSession
@@ -59,13 +60,31 @@ def _free_port() -> int:
 
 
 def active_count() -> int:
-    return sum(1 for p in _procs.values() if p.poll() is None)
+    """Sesiones activas: procesos locales más las que corren en workers."""
+    with SessionLocal() as db:
+        remote_n = db.scalar(
+            select(func.count())
+            .select_from(LiveSession)
+            .where(LiveSession.endpoint.is_not(None), LiveSession.status == "running")
+        )
+    return sum(1 for p in _procs.values() if p.poll() is None) + (remote_n or 0)
+
+
+def _base(sess: LiveSession) -> str:
+    """Dónde escucha el proceso de la sesión: en esta máquina o en el worker."""
+    return sess.endpoint or f"http://127.0.0.1:{sess.port}"
 
 
 def start_worker(sess: LiveSession, weights: str | None, classes: list[str], record_dir: Path) -> None:
     """Lanza el proceso y espera a que esté listo (cargar el modelo tarda). Lanza RuntimeError si no arranca."""
-    port, token = _free_port(), new_token()
     prm = sess.params
+    with SessionLocal() as db:
+        worker = remote.pick_worker(db, "live")
+        worker_id = worker.id if worker else None
+    if worker_id is not None:
+        _start_remote(sess, weights, classes, record_dir, worker_id)
+        return
+    port, token = _free_port(), new_token()
     detector = settings.live_detector or ("yolo" if weights else "none")
     cmd = [
         settings.live_python or settings.train_python,
@@ -119,9 +138,44 @@ def start_worker(sess: LiveSession, weights: str | None, classes: list[str], rec
     sess.port, sess.token, sess.pid = port, token, p.pid
 
 
+def _start_remote(sess: LiveSession, weights: str | None, classes: list[str], record_dir: Path, worker_id: int) -> None:
+    """La sesión corre en un worker: se le encarga y se espera a que diga dónde escucha."""
+    prm = sess.params
+    payload = {
+        "source": sess.source,
+        "detector": settings.live_detector or ("yolo" if weights else "none"),
+        "classes": classes,
+        "threshold": prm.get("threshold", 0.25),
+        "imgsz": prm.get("imgsz", 1280),
+        "loop": sess.source_kind == "video" and prm.get("loop", True),
+        "no_realtime": bool(prm.get("no_realtime")),
+        "record_dir": str(record_dir),
+    }
+    if weights:
+        payload["weights"] = weights
+    jid = remote.submit("live", payload, worker_id)
+    snap = remote.wait(
+        jid,
+        queue_timeout=settings.worker_queue_timeout,
+        stop_when=lambda s: "endpoint" in s["progress"],
+        poll=0.3,
+    )
+    if "endpoint" not in snap["progress"]:
+        remote.request_cancel(jid)
+        raise RuntimeError(
+            "el worker no pudo iniciar la sesión: " + (snap["error"] or snap["log"][-400:] or snap["status"])
+        )
+    sess.endpoint, sess.token, sess.pid = (
+        snap["progress"]["endpoint"],
+        snap["progress"]["token"],
+        snap["progress"].get("pid"),
+    )
+    sess.port, sess.job_id = None, jid
+
+
 def _get(sess: LiveSession, path: str, timeout: float = 5.0):
     return urllib.request.urlopen(
-        f"http://127.0.0.1:{sess.port}{path}{'&' if '?' in path else '?'}token={sess.token}", timeout=timeout
+        f"{_base(sess)}{path}{'&' if '?' in path else '?'}token={sess.token}", timeout=timeout
     )
 
 
@@ -134,7 +188,7 @@ def worker_stats(sess: LiveSession) -> dict | None:
 
 def worker_control(sess: LiveSession, body: dict) -> dict:
     rq = urllib.request.Request(
-        f"http://127.0.0.1:{sess.port}/control?token={sess.token}", data=json.dumps(body).encode(), method="POST"
+        f"{_base(sess)}/control?token={sess.token}", data=json.dumps(body).encode(), method="POST"
     )
     return json.load(urllib.request.urlopen(rq, timeout=5))
 
@@ -158,6 +212,9 @@ def stream_iter(sess: LiveSession):
 
 
 def alive(sess: LiveSession) -> bool:
+    if sess.endpoint:
+        snap = remote.get(sess.job_id) if sess.job_id else None
+        return bool(snap and snap["status"] == "running")
     p = _procs.get(sess.id)
     if p is not None:
         return p.poll() is None
@@ -165,6 +222,12 @@ def alive(sess: LiveSession) -> bool:
 
 
 def stop_worker(sess_id: int) -> None:
+    with SessionLocal() as db:
+        s = db.get(LiveSession, sess_id)
+        job_id = s.job_id if s and s.endpoint else None
+    if job_id:  # sesión remota: el worker detiene el proceso al recibir la cancelación en su próximo latido
+        remote.request_cancel(job_id)
+        return
     p = _procs.pop(sess_id, None)
     if p and p.poll() is None:
         try:
@@ -187,7 +250,7 @@ def recover_orphans() -> int:
     n = 0
     with SessionLocal() as db:
         for s in db.scalars(select(LiveSession).where(LiveSession.status.in_(["starting", "running"]))):
-            if s.pid:
+            if s.pid and not s.endpoint:  # (el pid de una sesión remota no existe en esta máquina)
                 try:
                     cmdline = Path(f"/proc/{s.pid}/cmdline").read_bytes().decode(errors="ignore")
                     if (

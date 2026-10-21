@@ -12,6 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from . import remote
 from .config import settings
 from .datasets import export_version
 from .db import SessionLocal
@@ -117,30 +118,21 @@ def _execute_training(run_id: int) -> None:
         export_version(db, version, project, work / "dataset", "yolo")
         out_weights = Path(settings.models_root) / project.slug / _safe(prm["model_name"]) / "best.pt"
         project_id, created_by, ver_id = project.id, run.created_by, version.id
-    cmd = [
-        settings.train_python,
-        str(settings.train_script),
-        "--data",
-        str(work / "dataset" / "data.yaml"),
-        "--weights",
-        resolve_weights(prm["arch"]),
-        "--epochs",
-        str(prm["epochs"]),
-        "--imgsz",
-        str(prm["imgsz"]),
-        "--batch",
-        str(prm["batch"]),
-        "--project",
-        str(work / "ultralytics"),
-        "--name",
-        "train",
-        "--device",
-        settings.device,
-        "--seed",
-        str(prm.get("seed", 0)),
-        "--out",
-        str(out_weights),
-    ]
+    args = {
+        "data": str(work / "dataset" / "data.yaml"),
+        "weights": resolve_weights(prm["arch"]),
+        "epochs": prm["epochs"],
+        "imgsz": prm["imgsz"],
+        "batch": prm["batch"],
+        "project": str(work / "ultralytics"),
+        "name": "train",
+        "device": settings.device,
+        "seed": prm.get("seed", 0),
+        "out": str(out_weights),
+    }
+    cmd = [settings.train_python, str(settings.train_script)]
+    for k, v in args.items():
+        cmd += [f"--{k}", str(v)]
     if run_id in _cancel:  # se canceló mientras se exportaba el dataset: ni siquiera se lanza
         with SessionLocal() as db:
             r = db.get(Run, run_id)
@@ -148,33 +140,13 @@ def _execute_training(run_id: int) -> None:
             db.commit()
         _cancel.discard(run_id)
         return
-    log, progress, result, last_flush = "", None, None, 0.0
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
-    _procs[run_id] = proc
-    if run_id in _cancel:  # la cancelación llegó entre la comprobación y el lanzamiento
-        cancel(run_id)
-
-    def flush(final: bool = False) -> None:
-        with SessionLocal() as db:
-            r = db.get(Run, run_id)
-            r.log = log[-LOG_CAP:]
-            r.metrics = {**(r.metrics or {}), "progress": progress}
-            db.commit()
-
-    import time
-
-    for line in proc.stdout:  # type: ignore[union-attr]
-        if line.startswith("PROGRESS "):
-            progress = json.loads(line[9:])
-        elif line.startswith("RESULT "):
-            result = json.loads(line[7:])
-        else:
-            log += line
-        if time.time() - last_flush > 2:
-            flush()
-            last_flush = time.time()
-    code = proc.wait()
-    _procs.pop(run_id, None)
+    with SessionLocal() as db:
+        worker = remote.pick_worker(db, "train")
+        worker_id = worker.id if worker else None
+    if worker_id is not None:
+        log, progress, result, code = _train_remote(run_id, args, prm["arch"], worker_id)
+    else:
+        log, progress, result, code = _train_local(run_id, cmd)
     with SessionLocal() as db:
         r = db.get(Run, run_id)
         r.log = log[-LOG_CAP:]
@@ -202,3 +174,54 @@ def _execute_training(run_id: int) -> None:
             r.log = (r.log or "") + f"\n[el proceso terminó con código {code}]"
         db.commit()
     _cancel.discard(run_id)
+
+
+def _train_local(run_id: int, cmd: list[str]) -> tuple[str, dict | None, dict | None, int]:
+    log, progress, result, last_flush = "", None, None, 0.0
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    _procs[run_id] = proc
+    if run_id in _cancel:  # la cancelación llegó entre la comprobación y el lanzamiento
+        cancel(run_id)
+
+    def flush(final: bool = False) -> None:
+        with SessionLocal() as db:
+            r = db.get(Run, run_id)
+            r.log = log[-LOG_CAP:]
+            r.metrics = {**(r.metrics or {}), "progress": progress}
+            db.commit()
+
+    import time
+
+    for line in proc.stdout:  # type: ignore[union-attr]
+        if line.startswith("PROGRESS "):
+            progress = json.loads(line[9:])
+        elif line.startswith("RESULT "):
+            result = json.loads(line[7:])
+        else:
+            log += line
+        if time.time() - last_flush > 2:
+            flush()
+            last_flush = time.time()
+    code = proc.wait()
+    _procs.pop(run_id, None)
+    return log, progress, result, code
+
+
+def _train_remote(run_id: int, args: dict, arch: str, worker_id: int) -> tuple[str, dict | None, dict | None, int]:
+    """Lo mismo que en local, pero el proceso corre en un worker; las rutas viven en la carpeta compartida."""
+    payload = {k: v for k, v in args.items() if k != "device"}
+    payload["weights"] = ARCHS[arch]  # el worker busca los preentrenados en sus propias carpetas
+    jid = remote.submit("train", payload, worker_id)
+
+    def on_update(snap: dict) -> None:
+        with SessionLocal() as db:
+            r = db.get(Run, run_id)
+            r.log = snap["log"][-LOG_CAP:]
+            r.metrics = {**(r.metrics or {}), "progress": snap["progress"].get("progress")}
+            db.commit()
+
+    snap = remote.wait(jid, on_update, lambda: run_id in _cancel)
+    if snap["status"] == "done" and snap["result"]:
+        return snap["log"], snap["progress"].get("progress"), snap["result"], 0
+    log = snap["log"] + (f"\n[{snap['error']}]" if snap["error"] else "")
+    return log, snap["progress"].get("progress"), None, 1

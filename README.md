@@ -101,3 +101,7 @@ Fases F0 a F7 del plan implementadas y probadas. Lo que queda no es código sino
 de entrenamiento un YOLOv8n no supera a la línea base de apariencia), fijar el IoU del proyecto y resolver la licencia.
 
 La interfaz anterior (`cv-residue-diff/scripts/label_app.py`) sigue funcionando sin cambios; `legacy/` guarda una copia de referencia.
+
+## GPU en otro equipo
+
+Los trabajos pesados pueden ejecutarse en un worker remoto: ver [docs/WORKERS.md](docs/WORKERS.md).

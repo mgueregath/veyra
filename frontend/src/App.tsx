@@ -53,7 +53,7 @@ export default function App() {
   if (pid !== null && projects.isLoading) return <div className="center">Cargando…</div>;
   if (project && view === "models") return <ModelsPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onRun={(m) => open(project, "run", m)} onLogout={logout} />;
   if (project && view === "run" && mid !== null) return <RunPage key={`${project.id}-${mid}`} project={project} user={who} modelId={mid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} onPickModel={(m) => open(project, "run", m)} onLogout={logout} />;
-  if (project && view === "admin") return <AdminPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onModels={() => open(project, "models")} onLogout={logout} />;
+  if (project && view === "admin") return <AdminPage key={project.id} project={project} user={who} superuser={!!me.data.is_superuser} onBack={() => open(project)} onProjects={() => open(null)} onModels={() => open(project, "models")} onLogout={logout} />;
   if (project) return <LabelPage key={project.id} project={project} user={who} onExit={() => open(null)} onLogout={logout} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} />;
   return <Projects user={who} onOpen={(p, v) => open(p, v ?? "label")} onLogout={logout} />;
 }

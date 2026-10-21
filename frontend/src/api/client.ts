@@ -47,6 +47,7 @@ export interface LiveSession {
 export interface Detection { bbox: [number, number, number, number]; label: string; score: number }
 export interface DetectItem { index: number; name: string; frame_id: number | null; width: number; height: number; image_url: string; dets: Detection[] }
 export interface DetectResult { id: string; model_id: number; model: string; classes: string[]; items: DetectItem[] }
+export interface GpuWorker { id: number; name: string; active: boolean; online: boolean; kinds: string[]; max_batch: number; max_live: number; capabilities: { gpus?: { name: string; memory_mb: number }[]; torch?: string | null; ultralytics?: string | null; version?: string }; last_seen: string | null; running_jobs: number }
 export interface ProjectVideo { id: number; name: string; has_file: boolean }
 export interface TeamMember { username: string; display_name: string | null; active: boolean; role: string }
 export interface Usage { images: { files: number; bytes: number }; videos: { files: number; bytes: number }; models: { bytes: number }; exports: { bytes: number }; owned_bytes: number; quota_bytes: number | null; over_quota: boolean }
@@ -130,6 +131,9 @@ export const api = {
     }
     return r.json() as Promise<DetectResult>;
   },
+  workers: () => req<{ mode: string; workers: GpuWorker[] }>("/api/admin/workers"),
+  createWorker: (name: string) => req<GpuWorker & { token: string }>("/api/admin/workers", { method: "POST", body: JSON.stringify({ name }) }),
+  revokeWorker: (id: number) => req<{ ok: boolean }>(`/api/admin/workers/${id}`, { method: "DELETE" }),
   liveStreamUrl: (id: number) => `/api/live/${id}/stream`,
   clipUrl: (id: number, name: string) => `/api/live/${id}/clips/${name}`,
   team: (pid: number) => req<TeamMember[]>(`/api/projects/${pid}/team`),

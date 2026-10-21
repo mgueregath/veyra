@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     live_start_timeout: float = 120.0  # segundos para cargar el modelo y abrir la fuente
     live_max: int = 2  # sesiones simultáneas (cada una ocupa la GPU y la CPU)
     live_allowed_hosts: str = ""  # lista separada por comas; vacío = cualquier host (solo admin/revisor pueden iniciar)
+    # dónde corre la GPU: local = subprocesos de esta máquina · remote = solo workers registrados
+    # · auto = en un worker si hay uno en línea y, si no, aquí
+    gpu_mode: str = "local"
+    worker_offline_after: float = 60.0  # segundos sin latidos para dar a un worker por desconectado
+    worker_queue_timeout: float = (
+        120.0  # cuánto espera un trabajo interactivo (detectar imágenes) a que un worker lo tome
+    )
     session_cookie: str = "labelhub_session"
     session_max_age: int = 60 * 60 * 24 * 14
 

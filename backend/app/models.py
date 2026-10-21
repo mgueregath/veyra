@@ -261,8 +261,48 @@ class LiveSession(Base):
     port: Mapped[int | None] = mapped_column(Integer)
     token: Mapped[str | None] = mapped_column(String(64))
     pid: Mapped[int | None] = mapped_column(Integer)
+    endpoint: Mapped[str | None] = mapped_column(String(200))  # sesión remota: URL del proceso en el worker
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("worker_jobs.id", ondelete="SET NULL"))
     status: Mapped[str] = mapped_column(String(10), default="starting")  # starting | running | stopped | failed
     summary: Mapped[dict | None] = mapped_column(JSONB)  # estadísticas al terminar
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GpuWorker(Base):
+    """Equipo con GPU que ejecuta trabajos por encargo de la API (ver el repositorio veyra-worker)."""
+
+    __tablename__ = "gpu_workers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True
+    )  # SHA-256 del token; el token solo se muestra al crearlo
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    kinds: Mapped[list] = mapped_column(JSONB, default=list)
+    max_batch: Mapped[int] = mapped_column(Integer, default=1)
+    max_live: Mapped[int] = mapped_column(Integer, default=1)
+    capabilities: Mapped[dict] = mapped_column(JSONB, default=dict)
+    last_seen: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkerJob(Base):
+    """Un encargo para un worker (train | predict | live): la API lo deja en cola y el worker lo reclama."""
+
+    __tablename__ = "worker_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(10), default="queued")  # queued | running | done | failed | cancelled
+    worker_id: Mapped[int | None] = mapped_column(ForeignKey("gpu_workers.id", ondelete="SET NULL"))
+    progress: Mapped[dict | None] = mapped_column(JSONB)
+    result: Mapped[dict | None] = mapped_column(JSONB)
+    log: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    cancel: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    claimed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))

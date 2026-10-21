@@ -22,7 +22,7 @@ const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: st
   { k: "system", label: "Sistema", icon: "server", title: "Sistema y almacenamiento", hint: "Uso de disco, estado del servicio, copia del proyecto y tu contraseña", sub: () => "Consulta el uso del proyecto y la actividad del servicio." },
 ];
 
-export default function AdminPage({ project, user, onBack, onProjects, onModels, onLogout }: { project: Project; user: string; onBack: () => void; onProjects: () => void; onModels: () => void; onLogout: () => void }) {
+export default function AdminPage({ project, user, superuser, onBack, onProjects, onModels, onLogout }: { project: Project; user: string; superuser: boolean; onBack: () => void; onProjects: () => void; onModels: () => void; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>("quality");
   const [preset, setPreset] = useState<string | null>(null);
   const isAdmin = project.role === "admin";
@@ -53,7 +53,7 @@ export default function AdminPage({ project, user, onBack, onProjects, onModels,
           {tab === "eval" && <Evaluation project={project} preset={preset} />}
           {tab === "team" && <Team project={project} isAdmin={isAdmin} me={user} />}
           {tab === "config" && <Settings project={project} isAdmin={isAdmin} />}
-          {tab === "system" && <System project={project} isAdmin={isAdmin} />}
+          {tab === "system" && <System project={project} isAdmin={isAdmin} superuser={superuser} />}
         </main>
       </div>
     </div>
@@ -619,7 +619,7 @@ function Team({ project, isAdmin, me }: { project: Project; isAdmin: boolean; me
   );
 }
 
-function System({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
+function System({ project, isAdmin, superuser }: { project: Project; isAdmin: boolean; superuser: boolean }) {
   const qc = useQueryClient();
   const usage = useQuery({ queryKey: ["usage", project.id], queryFn: () => api.usage(project.id), enabled: isAdmin });
   const sys = useQuery({ queryKey: ["system", project.id], queryFn: () => api.system(project.id), enabled: isAdmin, refetchInterval: 5000 });
@@ -670,6 +670,7 @@ function System({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
             <tbody>{(sys.data?.recent ?? []).map((r, i) => <tr key={i}><td>{new Date(r.at).toLocaleString()}</td><td>{r.user ?? "—"}</td><td>{r.action}{r.target ? ` · ${r.target}` : ""}</td></tr>)}</tbody></table>
         </section>
       </>)}
+      {superuser && <Workers />}
       <section className="card">
         <h2><span>Mi contraseña</span></h2>
         <div className="formrow">
@@ -679,5 +680,61 @@ function System({ project, isAdmin }: { project: Project; isAdmin: boolean }) {
         </div>
       </section>
     </div>
+  );
+}
+
+const ago = (iso: string | null) => {
+  if (!iso) return "nunca";
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? "hace instantes" : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`;
+};
+
+/** Equipos con GPU que ejecutan entrenamientos, predicciones y sesiones en vivo (solo administración del sistema). */
+function Workers() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["workers"], queryFn: api.workers, refetchInterval: 5000 });
+  const [name, setName] = useState("");
+  const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
+  const [err, setErr] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createWorker(name.trim()),
+    onSuccess: (w) => { setCreated({ name: w.name, token: w.token }); setName(""); setErr(""); void qc.invalidateQueries({ queryKey: ["workers"] }); },
+    onError: (e) => setErr((e as Error).message),
+  });
+  const revoke = useMutation({ mutationFn: (id: number) => api.revokeWorker(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["workers"] }) });
+  const mode = q.data?.mode ?? "local";
+  const MODE: Record<string, string> = { local: "Local: la GPU es la de este servidor", remote: "Remoto: solo workers registrados", auto: "Automático: un worker si hay uno en línea; si no, este servidor" };
+  const env = created ? `VEYRA_API_URL=${window.location.origin}\nVEYRA_WORKER_NAME=${created.name}\nVEYRA_WORKER_TOKEN=${created.token}` : "";
+  return (
+    <section className="card" id="workers">
+      <h2><span className="hic"><Icon name="cpu" size={17} /></span><span>Workers de GPU<small>Equipos que ejecutan los trabajos pesados. Modo de ejecución: <b id="gpu-mode">{MODE[mode] ?? mode}</b> (se cambia con LABELHUB_GPU_MODE).</small></span></h2>
+      <table className="tbl" id="workers-list">
+        <thead><tr><th>Nombre</th><th>Estado</th><th>GPU</th><th>Software</th><th className="num">Trabajos</th><th>Visto</th><th /></tr></thead>
+        <tbody>{(q.data?.workers ?? []).map((w) => (
+          <tr key={w.id} data-worker={w.name}>
+            <td>{w.name}</td>
+            <td><span className={"pill " + (!w.active ? "" : w.online ? "ok" : "warn")}><i className="dot" />{!w.active ? "Revocado" : w.online ? "En línea" : "Sin conexión"}</span></td>
+            <td>{w.capabilities.gpus?.[0] ? `${w.capabilities.gpus[0].name} · ${Math.round(w.capabilities.gpus[0].memory_mb / 1024)} GB` : "—"}</td>
+            <td>{w.capabilities.torch ? `torch ${w.capabilities.torch}` : "—"}{w.capabilities.ultralytics ? ` · ultralytics ${w.capabilities.ultralytics}` : ""}</td>
+            <td className="num">{w.running_jobs}</td>
+            <td>{ago(w.last_seen)}</td>
+            <td>{w.active && <button className="btn-outline" title="Revoca su token: deja de poder conectarse y sus trabajos en curso se dan por perdidos" onClick={() => { if (window.confirm(`¿Revocar el worker «${w.name}»?`)) revoke.mutate(w.id); }}>Revocar</button>}</td>
+          </tr>
+        ))}
+        {!q.data?.workers.length && <tr><td colSpan={7} className="emptyrow">Aún no hay workers registrados.</td></tr>}</tbody>
+      </table>
+      <div className="formrow">
+        <label className="fld">Registrar un worker<input id="wk-name" type="text" placeholder="p. ej. gpu-rtx4080" value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <button className="primary" id="wk-create" disabled={name.trim().length < 2 || create.isPending} onClick={() => create.mutate()}>Registrar</button>
+      </div>
+      {err && <p className="err" id="wk-err">{err}</p>}
+      {created && (
+        <div className="callout warnc" id="wk-token" style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <b>Token de «{created.name}»: cópialo ahora, no se vuelve a mostrar.</b>
+          <pre style={{ margin: "6px 0", whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 12 }}>{env}</pre>
+          <span className="formrow"><button className="btn-outline" onClick={() => void navigator.clipboard?.writeText(env)}>Copiar</button><button className="btn-outline" onClick={() => setCreated(null)}>Ya lo guardé</button></span>
+        </div>
+      )}
+    </section>
   );
 }

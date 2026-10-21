@@ -1,20 +1,30 @@
 """Predicciones de un modelo entrenado, para evaluarlo (proceso aparte con PyTorch; ver workers/predict_yolo.py)."""
 
 import json
+import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import remote
 from .config import settings
+from .db import SessionLocal
 from .evaluation import Pred
 from .models import Frame, Model, Project
 
 
 def predict_paths(m: Model, paths: list[str]) -> dict[str, list[Pred]]:
-    """Corre el modelo sobre archivos de imagen (en un proceso aparte) y devuelve sus cajas por ruta."""
+    """Corre el modelo sobre archivos de imagen (en un proceso aparte o en un worker) y devuelve sus cajas por ruta."""
+    with SessionLocal() as db:
+        worker = remote.pick_worker(db, "predict")
+        worker_id = worker.id if worker else None
+    if worker_id is not None:
+        raw = _predict_remote(m, paths, worker_id)
+        return _to_preds(m, paths, raw)
     with tempfile.TemporaryDirectory() as tmp:
         lst, out = Path(tmp) / "images.json", Path(tmp) / "pred.json"
         lst.write_text(json.dumps(paths))
@@ -36,6 +46,10 @@ def predict_paths(m: Model, paths: list[str]) -> dict[str, list[Pred]]:
         if r.returncode != 0 or not out.exists():
             raise RuntimeError("falló la inferencia: " + (r.stderr or r.stdout)[-400:])
         raw = json.loads(out.read_text())
+    return _to_preds(m, paths, raw)
+
+
+def _to_preds(m: Model, paths: list[str], raw: dict) -> dict[str, list[Pred]]:
     cls = m.classes
     return {
         path: [
@@ -45,6 +59,24 @@ def predict_paths(m: Model, paths: list[str]) -> dict[str, list[Pred]]:
         ]
         for path in paths
     }
+
+
+def _predict_remote(m: Model, paths: list[str], worker_id: int) -> dict:
+    """El worker lee las imágenes y los pesos de la carpeta compartida y deja el resultado en ella."""
+    work = Path(settings.runs_root) / "_predict" / uuid.uuid4().hex
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        jid = remote.submit(
+            "predict",
+            {"weights": m.path, "images": paths, "out": str(work / "pred.json"), "imgsz": m.params.get("imgsz", 1280)},
+            worker_id,
+        )
+        snap = remote.wait(jid, queue_timeout=settings.worker_queue_timeout)
+        if snap["status"] != "done":
+            raise RuntimeError("falló la inferencia en el worker: " + (snap["error"] or snap["log"][-400:]))
+        return json.loads((work / "pred.json").read_text())
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def model_predictions(db: Session, project: Project, model_id: int, frame_ids: list[int]) -> dict[int, list[Pred]]:

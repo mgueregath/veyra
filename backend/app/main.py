@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import live, training
+from . import live, remote, training
 from .config import settings
 from .routers import (
     admin,
@@ -18,6 +18,7 @@ from .routers import (
     models,
     projects,
     videos,
+    worker,
     workflow,
 )
 from .routers import (
@@ -29,6 +30,7 @@ from .routers import (
 async def lifespan(_: FastAPI):
     training.recover_interrupted()  # lo que quedó «en curso» al reiniciar se marca como interrumpido
     live.recover_orphans()
+    remote.recover()  # los trabajos remotos que nadie espera ya se cancelan
     yield
     live.stop_all()  # no dejar procesos de detección sueltos al apagar la API
 
@@ -54,6 +56,7 @@ app.include_router(assisted.router)
 app.include_router(live_router.router)
 app.include_router(detect.router)
 app.include_router(admin.router)
+app.include_router(worker.router)
 
 
 @app.get("/api/health")
