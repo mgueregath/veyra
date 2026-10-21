@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import SshKeysModal from "./SshKeysModal";
 
 /** Todo lo de la sesión y la configuración de la persona, en un desplegable: cambiar de proyecto, contraseña y salir. */
 export default function UserMenu({ user, role, projectName, onProjects, onLogout }: {
@@ -7,6 +8,7 @@ export default function UserMenu({ user, role, projectName, onProjects, onLogout
 }) {
   const [open, setOpen] = useState(false);
   const [pwd, setPwd] = useState(false);
+  const [keys, setKeys] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -33,11 +35,13 @@ export default function UserMenu({ user, role, projectName, onProjects, onLogout
             {role && <span className="mut">{ROLE[role] ?? role}{projectName ? ` · ${projectName}` : ""}</span>}
           </div>
           {onProjects && item("um-projects", "Cambiar de proyecto", "Volver a la lista de proyectos para abrir otro", onProjects)}
+          {item("um-keys", "Mis llaves SSH", "Llaves públicas para entrar con VS Code a los espacios de trabajo de tus proyectos", () => setKeys(true))}
           {item("um-password", "Cambiar mi contraseña", "Cambiar la contraseña con la que entras (mínimo 8 caracteres)", () => setPwd(true))}
           {item("um-logout", "Salir", "Cerrar la sesión en este navegador", onLogout)}
         </div>
       )}
       {pwd && <PasswordModal onClose={() => setPwd(false)} />}
+      {keys && <SshKeysModal onClose={() => setKeys(false)} />}
     </div>
   );
 }

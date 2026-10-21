@@ -457,7 +457,7 @@ try:
     check('«Gestión» está en la barra superior (junto a Etiquetar y Modelos) y ya no en el panel lateral', c.eval("document.getElementById('top').contains(document.getElementById('adminbtn'))&&!document.getElementById('side').contains(document.getElementById('adminbtn'))"))
     um = c.eval("(()=>{const b=document.getElementById('usermenu');return !!b&&!document.getElementById('umpop')})()")
     c.eval("document.getElementById('usermenu').click()"); time.sleep(0.3)
-    check('el usuario y su configuración van en un desplegable: cambiar de proyecto, contraseña y salir', um and c.eval("[...document.querySelectorAll('#umpop [role=menuitem]')].map(b=>b.id).join(',')") == 'um-projects,um-password,um-logout' and not c.eval("document.getElementById('top').querySelector('#logout')"))
+    check('el usuario y su configuración van en un desplegable: cambiar de proyecto, llaves SSH, contraseña y salir', um and c.eval("[...document.querySelectorAll('#umpop [role=menuitem]')].map(b=>b.id).join(',')") == 'um-projects,um-keys,um-password,um-logout' and not c.eval("document.getElementById('top').querySelector('#logout')"))
     c.eval("document.getElementById('usermenu').click()")
     im_ = json.loads(c.eval("JSON.stringify({cv:cv.getBoundingClientRect().toJSON(),v:view,w:img.width,h:img.height})"))
     check('la imagen se ve COMPLETA (contain) y con margen alrededor, nunca recortada ni pegada al borde', im_['w'] * im_['v']['s'] <= im_['cv']['width'] - 40 + 1 and im_['h'] * im_['v']['s'] <= im_['cv']['height'] - 40 + 1 and im_['v']['x'] >= 23 and im_['v']['y'] >= 23, f"{im_['w'] * im_['v']['s']:.0f}x{im_['h'] * im_['v']['s']:.0f} en {im_['cv']['width']:.0f}x{im_['cv']['height']:.0f}")

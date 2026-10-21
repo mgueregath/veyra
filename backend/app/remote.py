@@ -52,9 +52,12 @@ def reap(db: Session) -> int:
     return len(stale)
 
 
-def pick_worker(db: Session, kind: str) -> GpuWorker | None:
-    """None = ejecutar en esta máquina. Con gpu_mode=remote y sin worker en línea se lanza RemoteUnavailable."""
-    mode = settings.gpu_mode
+def pick_worker(db: Session, kind: str, force: bool = False) -> GpuWorker | None:
+    """None = ejecutar en esta máquina. Con gpu_mode=remote y sin worker en línea se lanza RemoteUnavailable.
+
+    `force`: el trabajo solo puede ejecutarlo un worker (espacios de trabajo): se ignora gpu_mode.
+    """
+    mode = "remote" if force else settings.gpu_mode
     if mode == "local":
         return None
     ws = [w for w in db.scalars(select(GpuWorker).where(GpuWorker.active)) if online(w) and kind in (w.kinds or [])]
@@ -69,6 +72,10 @@ def pick_worker(db: Session, kind: str) -> GpuWorker | None:
         for w in ws
     }
     return min(ws, key=lambda w: running[w.id])
+
+
+def online_workers(db: Session, kind: str) -> list[GpuWorker]:
+    return [w for w in db.scalars(select(GpuWorker).where(GpuWorker.active)) if online(w) and kind in (w.kinds or [])]
 
 
 def submit(kind: str, payload: dict, worker_id: int | None = None) -> int:

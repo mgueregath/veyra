@@ -310,3 +310,30 @@ class WorkerJob(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     claimed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SshKey(Base):
+    """Llave pública SSH de una persona: da acceso a los espacios de trabajo de los proyectos que administra."""
+
+    __tablename__ = "ssh_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    public_key: Mapped[str] = mapped_column(Text)  # «tipo base64», sin comentario
+    fingerprint: Mapped[str] = mapped_column(String(80), unique=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Workspace(Base):
+    """Espacio de trabajo de un proyecto (contenedor con SSH en el equipo con GPU): uno por proyecto, puerto fijo."""
+
+    __tablename__ = "workspaces"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True)
+    port: Mapped[int] = mapped_column(Integer, unique=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("worker_jobs.id", ondelete="SET NULL"))
+    idle_minutes: Mapped[float] = mapped_column(Float, default=45)  # 0 = no se apaga solo
+    cpus: Mapped[float] = mapped_column(Float, default=6)
+    memory: Mapped[str] = mapped_column(String(8), default="12g")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

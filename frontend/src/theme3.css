@@ -268,3 +268,9 @@ progress::-webkit-progress-bar{background:#ded5dc;border-radius:7px}progress::-w
 .undotoast .btn{background:transparent;color:#fff;border-color:#a56b86}
 .btn-danger.solid{background:#b83d52;color:#fff;border-color:#b83d52}.btn-danger.solid:hover{background:#9c3144}
 .delnote{margin:0;padding-left:20px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+
+/* ---- espacio de trabajo ---- */
+.steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:14px}.steps li{line-height:1.5}
+.steps pre{background:#2b2029;color:#f0e6ec;border-radius:8px;padding:12px 14px;margin:8px 0;font-size:13px;overflow:auto}
+.steps code,.card p code,.modalbox code{background:#f0e6ec;border-radius:4px;padding:1px 6px;font-size:12.5px}
+.btn-outline.sm{min-height:28px;padding:3px 10px;font-size:12.5px}

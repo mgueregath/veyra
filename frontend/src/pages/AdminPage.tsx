@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "../components/Icon";
 import ModePicker from "../components/ModePicker";
+import SshKeysModal from "../components/SshKeysModal";
 import TopNav from "../components/TopNav";
 import { api, type DatasetStats, type EvalExample, type Project, type RunSummary, type Status, type WorkMode } from "../api/client";
 
@@ -9,7 +10,7 @@ const STATUS_LABEL: Record<Status, string> = {
   pending: "Nadie la revisó", single: "Revisada por 1 persona", agreed: "Varias, de acuerdo", disagreement: "Varias, en desacuerdo", final: "Final (decidió el revisor)",
 };
 
-type Tab = "quality" | "assign" | "datasets" | "train" | "assist" | "eval" | "team" | "config" | "system";
+type Tab = "quality" | "assign" | "datasets" | "train" | "assist" | "eval" | "workspace" | "team" | "config" | "system";
 const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: string; sub: (n: string) => string }[] = [
   { k: "quality", label: "Calidad", icon: "shield", title: "Calidad del etiquetado", hint: "Estado del etiquetado, acuerdo entre personas y trabajo de cada una", sub: (n) => `Resumen del estado del etiquetado, acuerdo entre anotadores y trabajo por persona en el proyecto ${n}.` },
   { k: "assign", label: "Asignaciones", icon: "users", title: "Asignaciones", hint: "Reparto de imágenes entre el equipo", sub: () => "Reparte imágenes pendientes y organiza el trabajo del equipo." },
@@ -17,6 +18,7 @@ const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: st
   { k: "train", label: "Entrenamiento", icon: "cpu", title: "Entrenamiento", hint: "Entrenar modelos en la GPU", sub: () => "Entrena un detector y compara sus resultados." },
   { k: "assist", label: "Asistido", icon: "sparkles", title: "Etiquetado asistido", hint: "Preanotar con un modelo y buscar las imágenes más inciertas", sub: () => "Usa el modelo para proponer cajas y priorizar imágenes." },
   { k: "eval", label: "Evaluación", icon: "chart", title: "Evaluación de detectores", hint: "Medir detectores y modelos sobre un dataset", sub: () => "Compara resultados sobre una misma versión y partición." },
+  { k: "workspace", label: "Espacio de trabajo", icon: "terminal", title: "Espacio de trabajo", hint: "Entorno de desarrollo con GPU para los procesos de visión de este proyecto, que abres desde VS Code", sub: () => "Un entorno propio de este proyecto, con GPU y versionado, para crear y probar los procesos de visión desde VS Code." },
   { k: "team", label: "Equipo", icon: "users", title: "Equipo del proyecto", hint: "Personas y roles del proyecto", sub: (n) => `Administra las personas y sus permisos en ${n}.` },
   { k: "config", label: "Configuración", icon: "gear", title: "Configuración del proyecto", hint: "Nombre, descripción y etiquetas del proyecto", sub: () => "Define la identidad del proyecto y las clases de anotación." },
   { k: "system", label: "Sistema", icon: "server", title: "Sistema y almacenamiento", hint: "Uso de disco, estado del servicio, copia del proyecto y tu contraseña", sub: () => "Consulta el uso del proyecto y la actividad del servicio." },
@@ -33,7 +35,7 @@ export default function AdminPage({ project, user, superuser, onBack, onProjects
       <div className="adm">
         <nav className="adm-side" aria-label="Gestión del proyecto">
           <div className="adm-cap">Gestión del proyecto</div>
-          {SECTIONS.map((x) => (
+          {SECTIONS.filter((x) => x.k !== "workspace" || isAdmin).map((x) => (
             <span key={x.k} className="adm-grp">
               {x.k === "team" && <hr />}
               <button title={x.hint} id={"tab-" + x.k} className={"adm-item" + (tab === x.k ? " on" : "")} aria-current={tab === x.k ? "page" : undefined} onClick={() => setTab(x.k)}><Icon name={x.icon} size={19} />{x.label}</button>
@@ -51,6 +53,7 @@ export default function AdminPage({ project, user, superuser, onBack, onProjects
           {tab === "train" && <Training project={project} onEvaluate={(id) => { setPreset(`model:${id}`); setTab("eval"); }} />}
           {tab === "assist" && <Assisted project={project} isAdmin={isAdmin} />}
           {tab === "eval" && <Evaluation project={project} preset={preset} />}
+          {tab === "workspace" && <WorkspaceTab project={project} me={user} />}
           {tab === "team" && <Team project={project} isAdmin={isAdmin} me={user} />}
           {tab === "config" && <Settings project={project} isAdmin={isAdmin} />}
           {tab === "system" && <System project={project} isAdmin={isAdmin} superuser={superuser} />}
@@ -736,5 +739,79 @@ function Workers() {
         </div>
       )}
     </section>
+  );
+}
+
+const IDLE_CHOICES: [number, string][] = [[15, "15 min"], [30, "30 min"], [45, "45 min"], [60, "1 h"], [120, "2 h"], [240, "4 h"], [0, "Nunca"]];
+
+function Copy({ text, id }: { text: string; id?: string }) {
+  const [ok, setOk] = useState(false);
+  return <button id={id} className="btn-outline sm" onClick={() => { void navigator.clipboard?.writeText(text); setOk(true); window.setTimeout(() => setOk(false), 1500); }}><Icon name={ok ? "check" : "copy"} size={14} /> {ok ? "Copiado" : "Copiar"}</button>;
+}
+
+/** Espacio de trabajo del proyecto: un contenedor con SSH en el equipo con GPU, para abrirlo desde VS Code. */
+function WorkspaceTab({ project, me }: { project: Project; me: string }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["workspace", project.id], queryFn: () => api.workspace(project.id), refetchInterval: 3000 });
+  const [idle, setIdle] = useState<number | null>(null);
+  const [cpus, setCpus] = useState<number | null>(null);
+  const [mem, setMem] = useState<string | null>(null);
+  const [keys, setKeys] = useState(false);
+  const [err, setErr] = useState("");
+  const w = q.data;
+  const start = useMutation({
+    mutationFn: () => api.startWorkspace(project.id, { idle_minutes: idle ?? w?.idle_minutes, cpus: cpus ?? w?.cpus, memory: mem ?? w?.memory }),
+    onSuccess: (d) => { setErr(""); qc.setQueryData(["workspace", project.id], d); },
+    onError: (e) => setErr((e as Error).message),
+  });
+  const stop = useMutation({ mutationFn: () => api.stopWorkspace(project.id), onSuccess: (d) => qc.setQueryData(["workspace", project.id], d) });
+  if (q.isLoading) return <div className="center">Cargando…</div>;
+  if (!w) return <div className="center err">{(q.error as Error)?.message ?? "Sin datos"}</div>;
+  const busy = w.status === "starting" || start.isPending;
+  const noKey = w.keys?.without_key.includes(me);
+  return (
+    <div id="workspace" className="stack">
+      <section className="card">
+        <h2><span className="hic"><Icon name="terminal" size={17} /></span><span>Espacio de {project.name}<small>Contenedor en el equipo con GPU: tu código en <code>/workspace/project</code> (git), los datos de Veyra en <code>/data</code> (solo lectura).</small></span>
+          <span id="ws-state" className={"pill " + (w.status === "running" ? "ok" : w.status === "failed" ? "warn" : "")} style={{ marginLeft: "auto" }}><i className="dot" />{{ stopped: "Apagado", starting: "Arrancando…", running: "Encendido", failed: "Falló" }[w.status]}</span></h2>
+        {!w.worker_available && w.status === "stopped" && <div className="callout warnc" id="ws-noworker"><Icon name="alert" size={18} /><span>No hay ningún worker de GPU en línea que ofrezca espacios de trabajo.</span></div>}
+        {noKey && <div className="callout warnc" id="ws-nokey"><Icon name="key" size={18} /><span>Aún no tienes una llave SSH registrada: sin ella no podrás entrar.</span><button className="btn-outline" id="ws-addkey" onClick={() => setKeys(true)}>Registrar mi llave</button></div>}
+        {w.status === "failed" && <div className="callout warnc" id="ws-error"><Icon name="alert" size={18} /><span>{w.error || "No se pudo encender el espacio."}</span></div>}
+        {w.status === "stopped" && w.last_stop && <p className="note" id="ws-last"><Icon name="info" size={15} /> {w.last_stop === "idle" ? "Se apagó solo por inactividad." : "Se apagó."} {w.autosave && !w.autosave.endsWith("sin cambios") ? "Tu código quedó guardado en una copia automática (git)." : ""}</p>}
+        {w.status === "stopped" || w.status === "failed" ? (
+          <>
+            <div className="formrow">
+              <label className="fld">Se apaga tras<select id="ws-idle" value={idle ?? w.idle_minutes} onChange={(e) => setIdle(+e.target.value)}>{IDLE_CHOICES.map(([v, l]) => <option key={v} value={v}>{l === "Nunca" ? "Nunca (lo apago yo)" : `${l} sin uso`}</option>)}</select></label>
+              <label className="fld">CPU<input id="ws-cpus" type="number" min={1} max={16} step={1} value={cpus ?? w.cpus} onChange={(e) => setCpus(+e.target.value)} style={{ width: 80 }} /></label>
+              <label className="fld">Memoria<input id="ws-mem" type="text" value={mem ?? w.memory} onChange={(e) => setMem(e.target.value)} style={{ width: 80 }} /></label>
+              <button className="primary" id="ws-start" disabled={busy || !w.worker_available || noKey} onClick={() => start.mutate()} title="Crea el contenedor (o lo retoma) y deja listo el acceso por SSH"><Icon name="power" size={16} /> Encender</button>
+            </div>
+            <p className="note"><Icon name="info" size={15} /> «Sin uso» = ninguna ventana de VS Code conectada ni procesos con carga. Al apagarse se guarda una copia de tu código y todo lo de <code>/workspace</code> se conserva.</p>
+          </>
+        ) : (
+          <div className="formrow">
+            {w.status === "starting" && <span className="mut" id="ws-starting"><Icon name="info" size={15} /> Preparando el contenedor… la primera vez tarda un poco más.</span>}
+            <button className="btn-danger solid" id="ws-stop" onClick={() => stop.mutate()}><Icon name="power" size={16} /> Apagar</button>
+          </div>
+        )}
+        {err && <p className="err" id="ws-err">{err}</p>}
+      </section>
+
+      {w.status === "running" && (
+        <section className="card" id="ws-connect">
+          <h2><span>Cómo conectarte</span></h2>
+          <ol className="steps">
+            <li><b>Tu llave.</b> Debe estar registrada en <button className="linkish" onClick={() => setKeys(true)}>Mis llaves SSH</button> antes de encender (si la añades ahora, apaga y vuelve a encender).</li>
+            <li><b>Configuración de SSH.</b> Pega esto en tu <code>~/.ssh/config</code> y cambia <code>TU_LLAVE_PRIVADA</code> por el nombre de tu archivo de llave privada:
+              <pre id="ws-sshconfig">{w.ssh_config}</pre><Copy text={w.ssh_config ?? ""} id="ws-copy-config" /></li>
+            <li><b>VS Code.</b> Con la extensión <i>Remote - SSH</i>: «Remote-SSH: Connect to Host…» → <code>veyra-{w.slug}</code> y abre la carpeta <code>{w.workdir}</code>. O desde un terminal: <code id="ws-cmd">{w.vscode_cmd}</code> <Copy text={w.vscode_cmd ?? ""} /> · <a id="ws-vscode" href={w.vscode_url}>abrir en VS Code <Icon name="external" size={13} /></a></li>
+            <li><b>Dependencias nuevas.</b> <code>pip install paquete</code> (queda en el entorno del proyecto) y <code>veyra-apt install paquete</code> para paquetes del sistema. Anótalas en <code>requirements.txt</code> y haz commit.</li>
+            <li><b>Claude.</b> Instala la extensión o la CLI de Claude Code dentro de esa ventana remota: trabajará sobre los mismos archivos y la misma GPU.</li>
+          </ol>
+          <p className="note"><Icon name="info" size={15} /> Apagado automático tras {w.idle_minutes ? `${w.idle_minutes} min` : "—(nunca)"} sin uso. Acceso: {w.keys?.with_key.join(", ") || "—"}{w.keys?.without_key.length ? ` · sin llave: ${w.keys.without_key.join(", ")}` : ""}.</p>
+        </section>
+      )}
+      {keys && <SshKeysModal onClose={() => setKeys(false)} />}
+    </div>
   );
 }

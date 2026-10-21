@@ -20,6 +20,7 @@ from .routers import (
     videos,
     worker,
     workflow,
+    workspaces,
 )
 from .routers import (
     live as live_router,
@@ -57,6 +58,7 @@ app.include_router(live_router.router)
 app.include_router(detect.router)
 app.include_router(admin.router)
 app.include_router(worker.router)
+app.include_router(workspaces.router)
 
 
 @app.get("/api/health")

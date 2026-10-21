@@ -200,6 +200,57 @@ try:
     check("cuando el worker se registra aparece «En línea» con su GPU", wait_for(c, "document.querySelector('#workers-list tr[data-worker=gpu-prueba]').textContent.includes('En línea')&&document.querySelector('#workers-list tr[data-worker=gpu-prueba]').textContent.includes('RTX demo')", 15), c.eval("document.querySelector('#workers-list')?.textContent"))
     c.eval("window.confirm=()=>true;document.querySelector('#workers-list tr[data-worker=gpu-prueba] button').click()")
     check("revocar lo marca como revocado", wait_for(c, "document.querySelector('#workers-list tr[data-worker=gpu-prueba]').textContent.includes('Revocado')", 15))
+    # ---- espacio de trabajo: llaves SSH del usuario y encendido/apagado del espacio del proyecto
+    ED = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAdcTYJBw5A2ja8cNd1BUztHAk5zaMGLUwWZO4IU7CRD"
+    c.eval("document.getElementById('usermenu').click()"); wait_for(c, "!!document.getElementById('um-keys')")
+    c.eval("document.getElementById('um-keys').click()")
+    check("«Mis llaves SSH» abre el administrador de llaves", wait_for(c, "!!document.getElementById('sshkeys-modal')"))
+    set_input(c, "key-name", "portátil", "input"); set_input(c, "key-text", "esto no es una llave", "input", "HTMLTextAreaElement"); time.sleep(0.2)
+    c.eval("document.getElementById('key-add').click()")
+    check("una llave inválida se rechaza con el motivo", wait_for(c, "!!document.getElementById('key-err')&&document.getElementById('key-err').textContent.includes('llave')"), c.eval("document.getElementById('key-err')?.textContent"))
+    set_input(c, "key-text", ED + " yo@pc", "input", "HTMLTextAreaElement"); time.sleep(0.2)
+    c.eval("document.getElementById('key-add').click()")
+    check("una llave pública válida se registra y se lista con su huella", wait_for(c, "!!document.querySelector('#key-list tr[data-key=portátil]')&&document.getElementById('key-list').textContent.includes('SHA256:')"))
+    c.eval("document.getElementById('sk-x').click()")
+    c.eval("document.getElementById('tab-workspace').click()")
+    check("el espacio de trabajo avisa que no hay worker disponible y no deja encender", wait_for(c, "!!document.getElementById('ws-noworker')&&document.getElementById('ws-start').disabled"))
+    import json as _j, threading as _t
+    wk = root.call("POST", "/api/admin/workers", {"name": "gpu-ws"})["token"]
+    stop_sim = _t.Event()
+    def sim():
+        def call(path, body):
+            rq = _u.Request(f"http://127.0.0.1:{env.port}/api/worker{path}", data=_j.dumps(body).encode(), headers={"Authorization": "Bearer " + wk, "content-type": "application/json"}, method="POST")
+            raw = _u.urlopen(rq, timeout=40).read()
+            return _j.loads(raw) if raw else None
+        call("/register", {"kinds": ["workspace"], "max_batch": 1, "max_live": 1, "capabilities": {}})
+        running, cancelled = [], False
+        def beat():
+            while not stop_sim.is_set():
+                r = call("/heartbeat", {"running_jobs": running})
+                if running and running[0] in r["cancel_jobs"]:
+                    nonlocal cancelled
+                    cancelled = True
+                time.sleep(0.3)
+        _t.Thread(target=beat, daemon=True).start()
+        while not stop_sim.is_set():
+            job = call("/jobs/claim", {"kinds": ["workspace"], "wait": 2})
+            if job:
+                running.append(job["id"])
+                call(f"/jobs/{job['id']}/progress", {"host": "10.0.0.4", "port": job["payload"]["port"], "user": "veyra", "workdir": "/workspace/project"})
+                while not cancelled and not stop_sim.is_set():
+                    time.sleep(0.2)
+                call(f"/jobs/{job['id']}/finish", {"status": "cancelled", "result": {"reason": "stopped"}})
+                running.clear()
+                cancelled = False
+    _t.Thread(target=sim, daemon=True).start()
+    check("con un worker en línea se habilita «Encender»", wait_for(c, "!document.getElementById('ws-noworker')&&!document.getElementById('ws-start').disabled", 20))
+    c.eval("document.getElementById('ws-start').click()")
+    check("encender deja el espacio «Encendido» y muestra cómo conectarse desde VS Code", wait_for(c, "document.getElementById('ws-state').textContent.includes('Encendido')&&!!document.getElementById('ws-sshconfig')", 30) and "Host veyra-wf" in c.eval("document.getElementById('ws-sshconfig').textContent") and "Port 9100" in c.eval("document.getElementById('ws-sshconfig').textContent"), c.eval("document.getElementById('ws-state')?.textContent"))
+    check("hay un enlace para abrir en VS Code y un botón para copiar la configuración", c.eval("document.getElementById('ws-vscode').getAttribute('href')") == "vscode://vscode-remote/ssh-remote+veyra-wf/workspace/project" and c.eval("!!document.getElementById('ws-copy-config')"))
+    c.eval("document.getElementById('ws-stop').click()")
+    check("apagar lo deja «Apagado» y se puede volver a encender", wait_for(c, "document.getElementById('ws-state').textContent.includes('Apagado')&&!!document.getElementById('ws-start')", 30))
+    stop_sim.set()
+    c.eval("document.getElementById('tab-system').click()"); wait_for(c, "!!document.getElementById('pw-old')")
     set_input(c, "pw-old", "mala", "input"); set_input(c, "pw-new", "nueva-clave-33", "input"); time.sleep(0.2)
     c.eval("document.getElementById('pw-go').click()")
     check("cambiar mi contraseña con la actual equivocada se rechaza", wait_for(c, "document.getElementById('sys-msg')&&document.getElementById('sys-msg').textContent.includes('no es correcta')"))

@@ -48,6 +48,12 @@ export interface Detection { bbox: [number, number, number, number]; label: stri
 export interface DetectItem { index: number; name: string; frame_id: number | null; width: number; height: number; image_url: string; dets: Detection[] }
 export interface DetectResult { id: string; model_id: number; model: string; classes: string[]; items: DetectItem[] }
 export interface GpuWorker { id: number; name: string; active: boolean; online: boolean; kinds: string[]; max_batch: number; max_live: number; capabilities: { gpus?: { name: string; memory_mb: number }[]; torch?: string | null; ultralytics?: string | null; version?: string }; last_seen: string | null; running_jobs: number }
+export interface SshKeyInfo { id: number; name: string; type: string; fingerprint: string; created_at: string }
+export interface WorkspaceState {
+  status: "stopped" | "starting" | "running" | "failed"; error: string; port: number; idle_minutes: number; cpus: number; memory: string; slug: string;
+  worker_available: boolean; host?: string; user?: string; workdir?: string; last_stop?: string; autosave?: string;
+  ssh_config?: string; vscode_url?: string; vscode_cmd?: string; keys?: { with_key: string[]; without_key: string[] };
+}
 export interface ProjectVideo { id: number; name: string; has_file: boolean }
 export interface TeamMember { username: string; display_name: string | null; active: boolean; role: string }
 export interface Usage { images: { files: number; bytes: number }; videos: { files: number; bytes: number }; models: { bytes: number }; exports: { bytes: number }; owned_bytes: number; quota_bytes: number | null; over_quota: boolean }
@@ -136,6 +142,12 @@ export const api = {
   workers: () => req<{ mode: string; workers: GpuWorker[] }>("/api/admin/workers"),
   createWorker: (name: string) => req<GpuWorker & { token: string }>("/api/admin/workers", { method: "POST", body: JSON.stringify({ name }) }),
   revokeWorker: (id: number) => req<{ ok: boolean }>(`/api/admin/workers/${id}`, { method: "DELETE" }),
+  sshKeys: () => req<SshKeyInfo[]>("/api/me/ssh-keys"),
+  addSshKey: (name: string, public_key: string) => req<SshKeyInfo>("/api/me/ssh-keys", { method: "POST", body: JSON.stringify({ name, public_key }) }),
+  deleteSshKey: (id: number) => req<{ ok: boolean }>(`/api/me/ssh-keys/${id}`, { method: "DELETE" }),
+  workspace: (pid: number) => req<WorkspaceState>(`/api/projects/${pid}/workspace`),
+  startWorkspace: (pid: number, body: { idle_minutes?: number; cpus?: number; memory?: string }) => req<WorkspaceState>(`/api/projects/${pid}/workspace/start`, { method: "POST", body: JSON.stringify(body) }),
+  stopWorkspace: (pid: number) => req<WorkspaceState>(`/api/projects/${pid}/workspace/stop`, { method: "POST" }),
   liveStreamUrl: (id: number) => `/api/live/${id}/stream`,
   clipUrl: (id: number, name: string) => `/api/live/${id}/clips/${name}`,
   team: (pid: number) => req<TeamMember[]>(`/api/projects/${pid}/team`),

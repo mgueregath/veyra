@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     worker_queue_timeout: float = (
         120.0  # cuánto espera un trabajo interactivo (detectar imágenes) a que un worker lo tome
     )
+    workspace_ports: str = "9100-9199"  # puertos SSH fijos de los espacios de trabajo (uno por proyecto)
     session_cookie: str = "labelhub_session"
     session_max_age: int = 60 * 60 * 24 * 14
 
