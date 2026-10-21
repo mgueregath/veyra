@@ -10,3 +10,6 @@ media/
 *.egg-info/
 data/
 backups/
+
+*.pt
+*.onnx

@@ -12,6 +12,8 @@ dependencies = [
   "pydantic-settings",
   "itsdangerous",
   "python-multipart",
+  "numpy",
+  "opencv-python-headless",
 ]
 
 [project.optional-dependencies]

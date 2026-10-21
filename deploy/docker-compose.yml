@@ -1,0 +1,47 @@
+# Veyra en producción: API + interfaz y PostgreSQL. La GPU está en un worker aparte (repo veyra-worker).
+#   cp .env.example .env  (completar)  ·  docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: veyra-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: labelhub
+      POSTGRES_DB: labelhub
+      POSTGRES_PASSWORD: ${VEYRA_DB_PASSWORD:?defínela en .env}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labelhub -d labelhub"]
+      interval: 5s
+      retries: 20
+
+  api:
+    image: docker.labs.hapticus.cl/veyra:${VEYRA_VERSION:-0.1.0}
+    container_name: veyra-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LABELHUB_DATABASE_URL: postgresql+psycopg2://labelhub:${VEYRA_DB_PASSWORD}@db:5432/labelhub
+      LABELHUB_SECRET_KEY: ${VEYRA_SECRET_KEY:?defínela en .env}
+      LABELHUB_MEDIA_ROOT: /data/media
+      LABELHUB_MODELS_ROOT: /data/models
+      LABELHUB_RUNS_ROOT: /data/runs
+      LABELHUB_EXPORT_ROOT: /data/exports
+      LABELHUB_GPU_MODE: ${VEYRA_GPU_MODE:-remote}
+    ports:
+      - "${VEYRA_BIND_1:-10.0.0.51}:8899:8899"
+      - "${VEYRA_BIND_2:-100.64.0.51}:8899:8899"
+    volumes:
+      - veyra_data:/data
+
+volumes:
+  # Carpeta compartida con el worker de GPU: imágenes, videos, modelos, exportaciones y resultados.
+  veyra_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${VEYRA_NFS_ADDR:-192.168.1.34},rw,nolock,hard"
+      device: "${VEYRA_NFS_DEVICE:-:/mnt/main/veyra}"
