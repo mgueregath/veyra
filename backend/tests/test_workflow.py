@@ -410,3 +410,45 @@ def test_dataset_warnings_for_empty_partitions(client, world):
     admin = as_user("adm")
     st = admin.post(f"/api/projects/{world['project'].id}/datasets", json={"name": "v1", "split": [1, 0, 0]}).json()
     assert any("val está vacía" in w for w in st["warnings"]) and any("test está vacía" in w for w in st["warnings"])
+
+
+def test_export_can_include_the_discarded_boxes(client, world, db, tmp_path, monkeypatch):
+    import json
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "export_root", tmp_path / "exports")
+    a, b = world["frames"]
+    ana = as_user("ana")
+    rejected = box((60, 5, 12, 12), "louse", deleted=True)  # una propuesta del detector que la persona rechazó
+    save(ana, a.id, [box(), box((70, 60, 5, 5), "not_louse"), rejected])
+    save(ana, b.id, [box((5, 5, 10, 10))])
+    admin, rev = as_user("adm"), as_user("rev")
+    pid = world["project"].id
+    vid = admin.post(f"/api/projects/{pid}/datasets", json={"name": "d1", "split": [1, 0, 0]}).json()["id"]
+    plain = rev.post(f"/api/datasets/{vid}/export", json={"format": "both"}).json()
+    assert plain["manifest"]["classes"] == ["louse", "fly"] and plain["manifest"]["include_discarded"] is False
+    full = rev.post(f"/api/datasets/{vid}/export", json={"format": "both", "include_discarded": True})
+    assert full.status_code == 200, full.text
+    out = tmp_path / "exports" / "demo" / "d1+descartadas"  # carpeta aparte: no pisa la exportación normal
+    assert full.json()["path"] == str(out.resolve())
+    m = full.json()["manifest"]
+    assert m["classes"] == ["louse", "fly", "not_louse", "descartada"] and m["include_discarded"] is True
+    assert (
+        m["boxes"]["train"]["louse"] == 2
+        and m["boxes"]["train"]["not_louse"] == 1
+        and m["boxes"]["train"]["descartada"] == 1
+    )
+    lines = (out / "labels" / "train" / "v1__f000000.txt").read_text().split("\n")[:-1]
+    assert sorted(ln.split()[0] for ln in lines) == ["0", "2", "3"]  # piojo, ni piojo ni mosca, descartada
+    yaml = (out / "data.yaml").read_text()
+    assert "2: not_louse" in yaml and "3: descartada" in yaml
+    coco = json.loads((out / "annotations_train.json").read_text())
+    assert [c["name"] for c in coco["categories"]] == ["louse", "fly", "not_louse", "descartada"]
+    assert sorted(x["category_id"] for x in coco["annotations"]) == [1, 1, 3, 4]
+    # la exportación normal no cambió: sin descartadas
+    assert "descartada" not in (tmp_path / "exports" / "demo" / "d1" / "data.yaml").read_text()
+    # la versión es inmutable: lo descartado después ya no entra en una versión vieja
+    save(ana, a.id, [box()])
+    again = rev.post(f"/api/datasets/{vid}/export", json={"format": "yolo", "include_discarded": True}).json()
+    assert again["manifest"]["boxes"]["train"]["descartada"] == 1

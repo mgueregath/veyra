@@ -148,6 +148,9 @@ try:
     out = env.data / "exports" / "wf" / "v1"
     man = json.load(open(out / "manifest.json"))
     check("datasets: el manifiesto de lo exportado cuadra con la versión", sum(man["frames"].values()) == c.eval("(()=>{const t=document.querySelectorAll('#ds-detail tbody tr');return [...t].reduce((a,r)=>a+(+r.children[1].textContent),0)})()"))
+    c.eval("document.getElementById('ds-incl-discarded').click()"); time.sleep(0.2)
+    c.eval("document.getElementById('ds-exp-yolo').click()")
+    check("datasets: con «incluir descartadas» se exporta aparte, con las clases adicionales", wait_for(c, "document.getElementById('ds-path')?.textContent.includes('v1+descartadas')") and "descartada" in json.load(open(env.data / "exports" / "wf" / "v1+descartadas" / "manifest.json"))["classes"])
     # ---- gestión: evaluación de una línea base
     c.eval("document.getElementById('tab-eval').click()"); time.sleep(0.8)
     check("evaluación: aparece el formulario con la versión creada", wait_for(c, "!!document.getElementById('ev-go')&&document.getElementById('ev-version').options.length>=1"))

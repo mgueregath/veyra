@@ -208,6 +208,8 @@ class DatasetItem(Base):
     split: Mapped[str] = mapped_column(String(8))  # train | val | test (fijo por video, igual en todas las versiones)
     source: Mapped[str] = mapped_column(String(12))  # review | agreed | single
     boxes: Mapped[list] = mapped_column(JSONB, default=list)  # [{"bbox": [x,y,w,h], "label": "louse"}]
+    # cajas que la persona descartó (borrado suave) al congelar la versión; solo se exportan si se pide
+    discarded: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     version: Mapped[DatasetVersion] = relationship(back_populates="items")
 
 

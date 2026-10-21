@@ -82,15 +82,15 @@ def dataset_detail(version_id: int, user: User = Depends(current_user), db: Sess
 @router.post("/datasets/{version_id}/export")
 def export_dataset(version_id: int, body: ExportIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     v, p = _version(db, user, version_id, {"admin", "reviewer"})
-    out = settings.export_root / p.slug / v.name
-    manifest = ds.export_version(db, v, p, out, body.format)
+    out = settings.export_root / p.slug / (v.name + ("+descartadas" if body.include_discarded else ""))
+    manifest = ds.export_version(db, v, p, out, body.format, body.include_discarded)
     db.add(
         AuditLog(
             user_id=user.id,
             project_id=p.id,
             action="dataset.export",
             target=f"dataset:{v.id}",
-            detail={"format": body.format},
+            detail={"format": body.format, "include_discarded": body.include_discarded},
         )
     )
     db.commit()

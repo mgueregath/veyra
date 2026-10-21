@@ -143,7 +143,7 @@ export const api = {
   datasets: (pid: number) => req<DatasetSummary[]>(`/api/projects/${pid}/datasets`),
   createDataset: (pid: number, body: { name: string; include: string[]; split: number[]; seed: string }) => req<DatasetStats>(`/api/projects/${pid}/datasets`, { method: "POST", body: JSON.stringify(body) }),
   dataset: (id: number) => req<DatasetStats>(`/api/datasets/${id}`),
-  exportDataset: (id: number, format: "yolo" | "coco" | "both") => req<{ path: string; manifest: { frames: Record<string, number> } }>(`/api/datasets/${id}/export`, { method: "POST", body: JSON.stringify({ format }) }),
+  exportDataset: (id: number, format: "yolo" | "coco" | "both", includeDiscarded = false) => req<{ path: string; manifest: { frames: Record<string, number> } }>(`/api/datasets/${id}/export`, { method: "POST", body: JSON.stringify({ format, include_discarded: includeDiscarded }) }),
   createEvaluation: (pid: number, body: { dataset_version_id: number; split: string; detector: string; score_threshold: number | null; iou: number }) => req<RunSummary>(`/api/projects/${pid}/evaluations`, { method: "POST", body: JSON.stringify(body) }),
   runs: (pid: number, kind?: string) => req<RunSummary[]>(`/api/projects/${pid}/runs${kind ? `?kind=${kind}` : ""}`),
   run: (id: number) => req<RunSummary>(`/api/runs/${id}`),

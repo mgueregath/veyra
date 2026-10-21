@@ -52,6 +52,11 @@ def class_sets(project: Project) -> tuple[list[str], set[str]]:
     return [c["id"] for c in classes if not c.get("negative")], {c["id"] for c in classes if c.get("negative")}
 
 
+def discarded(ann: Annotation) -> list[dict]:
+    """Cajas borradas por la persona (borrado suave): detecciones del modelo o del detector que se rechazaron."""
+    return [{"bbox": [b.x, b.y, b.w, b.h], "label": b.label} for b in ann.boxes if b.deleted]
+
+
 def labeled(ann: Annotation) -> list[consensus.LabeledBox]:
     """Cajas vivas con etiqueta (las borradas y las sin etiquetar no cuentan)."""
     return [((b.x, b.y, b.w, b.h), b.label) for b in ann.boxes if not b.deleted and b.label is not None]
@@ -114,15 +119,19 @@ def compute_states(db: Session, project: Project, frame_ids: list[int] | None = 
     return out
 
 
-def final_boxes(db: Session, frame_id: int, state: FrameState) -> list[dict] | None:
-    """Etiquetas finales de la imagen según su estado, o None si todavía no hay (pending o desacuerdo)."""
+def final_annotation(db: Session, frame_id: int, state: FrameState) -> Annotation | None:
     if state.final_user_id is None:
         return None
-    ann = db.scalar(
+    return db.scalar(
         select(Annotation)
         .options(selectinload(Annotation.boxes))
         .where(Annotation.frame_id == frame_id, Annotation.user_id == state.final_user_id)
     )
+
+
+def final_boxes(db: Session, frame_id: int, state: FrameState) -> list[dict] | None:
+    """Etiquetas finales de la imagen según su estado, o None si todavía no hay (pending o desacuerdo)."""
+    ann = final_annotation(db, frame_id, state)
     if ann is None:
         return None
     return [{"bbox": list(bb), "label": lb} for bb, lb in labeled(ann)]

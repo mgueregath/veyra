@@ -201,12 +201,13 @@ function Datasets({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
   const [seed, setSeed] = useState("labelhub");
   const [open, setOpen] = useState<number | null>(null);
   const [exported, setExported] = useState<string>("");
+  const [withDiscarded, setWithDiscarded] = useState(false);
   const detail = useQuery({ queryKey: ["dataset", open], queryFn: () => api.dataset(open!), enabled: open !== null });
   const create = useMutation({
     mutationFn: () => api.createDataset(project.id, { name, include, split: split.map((x) => x / 100), seed }),
     onSuccess: (d: DatasetStats) => { void qc.invalidateQueries({ queryKey: ["datasets", project.id] }); setOpen(d.id); setName(""); },
   });
-  const exp = useMutation({ mutationFn: (v: { id: number; f: "yolo" | "coco" | "both" }) => api.exportDataset(v.id, v.f), onSuccess: (r) => setExported(r.path) });
+  const exp = useMutation({ mutationFn: (v: { id: number; f: "yolo" | "coco" | "both" }) => api.exportDataset(v.id, v.f, withDiscarded), onSuccess: (r) => setExported(r.path) });
   const cls = project.config.classes.filter((c) => !c.negative);
   const sum = split[0] + split[1] + split[2];
   return (
@@ -253,6 +254,9 @@ function Datasets({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
               <button title="Escribe esta versión en disco en el formato elegido (las imágenes son enlaces a los originales)" key={f} id={"ds-exp-" + f} onClick={() => exp.mutate({ id: detail.data!.id, f })} disabled={exp.isPending || project.role === "labeler" || project.role === "viewer"}>Exportar {f === "both" ? "YOLO + COCO" : f.toUpperCase()}</button>
             ))}
           </div>
+          <label className="mut" title="Suma al archivo las cajas que la persona descartó como clases adicionales: «ni piojo ni mosca» (clases negativas) y «descartada» (cajas borradas, p. ej. detecciones del modelo que se rechazaron). Sirven de ejemplos negativos. Las versiones creadas antes de esta opción no guardaron las borradas.">
+            <input type="checkbox" id="ds-incl-discarded" checked={withDiscarded} onChange={(e) => setWithDiscarded(e.target.checked)} /> Incluir las etiquetas descartadas (clases negativas y cajas borradas)
+          </label>
           {exported && <p className="okmsg" id="ds-path">Exportado en <code>{exported}</code></p>}
           {exp.error && <p className="err">{(exp.error as Error).message}</p>}
         </div>

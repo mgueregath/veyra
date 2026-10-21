@@ -35,6 +35,9 @@ def main(argv=None):
     ex.add_argument("version")
     ex.add_argument("--out", type=Path, required=True)
     ex.add_argument("--format", choices=["yolo", "coco", "both"], default="yolo")
+    ex.add_argument(
+        "--include-discarded", action="store_true", help="incluye las cajas descartadas como clases adicionales"
+    )
     rs = sub.add_parser("restore-project", help="crea un proyecto nuevo desde una copia (.json.gz) descargada")
     rs.add_argument("file", type=Path)
     rs.add_argument("--slug")
@@ -86,7 +89,7 @@ def main(argv=None):
             )
             if not version:
                 raise SystemExit("proyecto o versión inexistente")
-            print(export_version(db, version, project, a.out, a.format))
+            print(export_version(db, version, project, a.out, a.format, a.include_discarded))
         elif a.cmd == "restore-project":
             from .backup import load_bytes, restore_project
 

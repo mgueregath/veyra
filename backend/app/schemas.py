@@ -147,6 +147,7 @@ class DatasetIn(BaseModel):
 
 class ExportIn(BaseModel):
     format: str = Field("yolo", pattern="^(yolo|coco|both)$")
+    include_discarded: bool = False  # suma las cajas descartadas (clases negativas y borradas) como clases adicionales
 
 
 class ClassIn(BaseModel):

@@ -36,7 +36,7 @@ otro objeto.
 | Equipo | Proyectos, roles (administrador, revisor, etiquetador, lector), cola de trabajo con bloqueo atómico, reparto con doble etiquetado, acuerdo entre personas |
 | Archivos fuente | Gestión → Archivos fuente: videos e imágenes sueltas del proyecto. Carga de imágenes con o sin etiquetas (YOLO o COCO, sueltas o en .zip) y de videos, con subidas que siguen en segundo plano |
 | Muestreo de videos | **Automático** (un fotograma cada N segundos entre un inicio y un final) o **manual** en una pantalla propia: el video se reproduce, la instantánea queda encima con el video en pausa y se etiqueta ahí mismo |
-| Datos | Versiones de dataset inmutables con reparto train/val/test **por video**, exportación YOLO y COCO |
+| Datos | Versiones de dataset inmutables con reparto train/val/test **por video**, exportación YOLO y COCO (opcionalmente con las etiquetas descartadas: clases negativas y cajas borradas, como clases adicionales) |
 | Modelos | Evaluación (mAP, precisión, recall, F1, conteo por video, errores), entrenamiento YOLO en GPU con cola y registro, preanotación y búsqueda de imágenes inciertas |
 | Flujos de detección | Modelos entrenados, detectores y procedimientos del proyecto combinados con **O / Y**; se aplican al etiquetado asistido, a imágenes, a video, a cámaras en vivo y a la evaluación |
 | Espacios de trabajo | Un entorno por proyecto con GPU y versionado, al que se entra con VS Code por SSH, para desarrollar los procedimientos de visión que luego usan los flujos |

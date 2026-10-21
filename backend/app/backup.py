@@ -123,7 +123,13 @@ def dump_project(db: Session, project: Project) -> dict:
                 "rules": v.rules,
                 "created_by": users[v.created_by],
                 "items": [
-                    {"frame": fkey[i.frame_id], "split": i.split, "source": i.source, "boxes": i.boxes}
+                    {
+                        "frame": fkey[i.frame_id],
+                        "split": i.split,
+                        "source": i.source,
+                        "boxes": i.boxes,
+                        "discarded": i.discarded,
+                    }
                     for i in v.items
                     if i.frame_id in fkey
                 ],
@@ -225,7 +231,13 @@ def restore_project(db: Session, data: dict, slug: str | None = None, name: str 
             created_by=users.get(d["created_by"], next(iter(users.values()))),
         )
         v.items = [
-            DatasetItem(frame_id=fr[tuple(i["frame"])].id, split=i["split"], source=i["source"], boxes=i["boxes"])
+            DatasetItem(
+                frame_id=fr[tuple(i["frame"])].id,
+                split=i["split"],
+                source=i["source"],
+                boxes=i["boxes"],
+                discarded=i.get("discarded", []),
+            )
             for i in d["items"]
         ]
         db.add(v)

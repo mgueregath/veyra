@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from . import consensus
 from .config import settings
 from .models import DatasetItem, DatasetVersion, Frame, Project, Video
-from .workflow import FrameState, class_sets, compute_states, final_boxes
+from .workflow import FrameState, class_sets, compute_states, discarded, final_annotation, labeled
 
 SPLITS = ("train", "val", "test")
 
@@ -49,15 +49,16 @@ def create_version(
     db.flush()
     for fid, vname in rows:
         st: FrameState = states[fid]
-        boxes = final_boxes(db, fid, st)
-        if boxes is None:
+        ann = final_annotation(db, fid, st)
+        if ann is None:
             continue
         v.items.append(
             DatasetItem(
                 frame_id=fid,
                 split=consensus.split_for_video(vname, seed, tuple(fractions)),
                 source=_source(st),
-                boxes=boxes,
+                boxes=[{"bbox": list(bb), "label": lb} for bb, lb in labeled(ann)],
+                discarded=discarded(ann),
             )
         )
     db.commit()
@@ -104,17 +105,30 @@ def _fname(video: str, frame_index: int) -> str:
     return f"{video}__f{frame_index:06d}.jpg"
 
 
-def export_version(db: Session, version: DatasetVersion, project: Project, out_dir: Path, fmt: str) -> dict:
-    """Escribe la versión en disco. Las imágenes son ENLACES a los originales (no se copian: el disco es limitado)."""
-    positive, _ = class_sets(project)
-    cls_idx = {c: i for i, c in enumerate(positive)}
+DISCARDED_CLASS = "descartada"
+
+
+def export_version(
+    db: Session, version: DatasetVersion, project: Project, out_dir: Path, fmt: str, include_discarded: bool = False
+) -> dict:
+    """Escribe la versión en disco. Las imágenes son ENLACES a los originales (no se copian: el disco es limitado).
+
+    Con `include_discarded` también salen las cajas descartadas, como clases adicionales después de las positivas: las
+    de clases negativas (p. ej. «ni piojo ni mosca») con su propia clase y las borradas por la persona como «descartada»
+    (los rechazos de un detector sirven de ejemplos negativos). Las versiones anteriores a esta opción no guardaron las
+    borradas.
+    """
+    positive, negative = class_sets(project)
+    neg_ids = [c["id"] for c in (project.config or {}).get("classes", []) if c["id"] in negative]
+    classes = positive + (neg_ids + [DISCARDED_CLASS] if include_discarded else [])
+    cls_idx = {c: i for i, c in enumerate(classes)}
     out_dir = Path(out_dir)
     media = Path(settings.media_root).resolve()
     rows = _frame_rows(db, [i.frame_id for i in version.items])
     counts = {s: 0 for s in SPLITS}
-    boxes_n = {s: {c: 0 for c in positive} for s in SPLITS}
+    boxes_n = {s: {c: 0 for c in classes} for s in SPLITS}
     coco = {
-        s: {"images": [], "annotations": [], "categories": [{"id": i + 1, "name": c} for i, c in enumerate(positive)]}
+        s: {"images": [], "annotations": [], "categories": [{"id": i + 1, "name": c} for i, c in enumerate(classes)]}
         for s in SPLITS
     }
     ann_id = 1
@@ -122,6 +136,8 @@ def export_version(db: Session, version: DatasetVersion, project: Project, out_d
         f, vname = rows[it.frame_id]
         name = _fname(vname, f.frame_index)
         pos = [b for b in it.boxes if b["label"] in cls_idx]
+        if include_discarded:
+            pos += [{"bbox": b["bbox"], "label": DISCARDED_CLASS} for b in (it.discarded or [])]
         src = media / f.image_path
         for sub in ("images", "labels"):
             (out_dir / sub / it.split).mkdir(parents=True, exist_ok=True)
@@ -152,7 +168,7 @@ def export_version(db: Session, version: DatasetVersion, project: Project, out_d
             ann_id += 1
             boxes_n[it.split][b["label"]] += 1
     if fmt in ("yolo", "both"):
-        names = "\n".join(f"  {i}: {c}" for i, c in enumerate(positive))
+        names = "\n".join(f"  {i}: {c}" for i, c in enumerate(classes))
         (out_dir / "data.yaml").write_text(
             f"path: {out_dir.resolve()}\ntrain: images/train\nval: images/val\ntest: images/test\nnames:\n{names}\n"
         )
@@ -164,7 +180,8 @@ def export_version(db: Session, version: DatasetVersion, project: Project, out_d
         "version": version.name,
         "rules": version.rules,
         "format": fmt,
-        "classes": positive,
+        "classes": classes,
+        "include_discarded": include_discarded,
         "frames": counts,
         "boxes": boxes_n,
     }
