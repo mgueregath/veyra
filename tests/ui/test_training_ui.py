@@ -133,6 +133,13 @@ try:
     wait_for(c, "!!window.__lh&&!!window.__lh.editor&&!!window.__lh.editor.doc")
     c.eval(f"(()=>{{const i=window.__lh.frames().findIndex(f=>f.id=={UNREV[0]});const g=document.getElementById('goto');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(g,String(i+1));g.dispatchEvent(new Event('input',{{bubbles:true}}));g.focus();g.dispatchEvent(new KeyboardEvent('keydown',{{key:'Enter',bubbles:true}}))}})()")
     check("en el editor, las cajas del modelo aparecen sin etiquetar y marcadas «modelo»", wait_for(c, "window.__lh.editor.doc&&window.__lh.editor.doc.boxes.some(b=>b.sources.includes('model'))&&window.__lh.editor.doc.boxes.every(b=>b.label===null)", 10))
+    c.eval("document.getElementById('refresh-assisted').click()")
+    check("«Refrescar asistido» sin detector elegido avisa dónde definirlo", wait_for(c, "document.body.textContent.includes('Gestión → Asistido')", 10))
+    c.eval("fetch('/api/projects/%d/assisted',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({flow_id:%d})})" % (PID, fl[0]["id"])); time.sleep(1)
+    c.eval("(()=>{const d=window.__lh.editor.doc;d.boxes=d.boxes.filter(b=>!b.sources.some(s=>s.startsWith('flow:')));})()")  # simula que no hay cajas del flujo
+    n0 = c.eval("window.__lh.editor.doc.boxes.length")
+    c.eval("document.getElementById('refresh-assisted').click()")
+    check("«Refrescar asistido» vuelve a proponer las cajas del detector elegido sobre la imagen actual", wait_for(c, f"window.__lh.editor.doc.boxes.length>{n0}&&window.__lh.editor.doc.boxes.some(b=>b.sources.some(s=>s.startsWith('flow:')))&&!document.getElementById('refresh-assisted').disabled", 40), c.eval("window.__lh.editor.doc.boxes.length"))
     print("\nRESUMEN: %d/%d OK" % (sum(res.values()), len(res)))
 finally:
     from app import training

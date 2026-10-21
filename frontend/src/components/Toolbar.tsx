@@ -17,9 +17,10 @@ const ago = (iso: string) => {
 };
 
 /** Barra bajo la cabecera: imagen actual y su estado, herramientas, clase activa y zoom. */
-export default function Toolbar({ index, detail, editor, ui, classes, activeClass, canWrite, lockHolder, collab, canTrash, onTrash, onClass }: {
+export default function Toolbar({ index, detail, editor, ui, classes, activeClass, canWrite, lockHolder, collab, canTrash, onTrash, onClass, onRefresh, refreshing }: {
   index: number; detail: FrameDetail | null; editor: BoxEditor | null; ui: EditorUi | undefined; classes: ClassDef[]; activeClass: string | undefined;
   canWrite: boolean; lockHolder: string | null; collab: boolean; canTrash: boolean; onTrash: () => void; onClass: (id: string) => void;
+  onRefresh: () => void; refreshing: boolean;
 }) {
   const status: Status = detail?.status ?? "pending";
   const pos = classes.filter((c) => !c.negative);
@@ -42,6 +43,12 @@ export default function Toolbar({ index, detail, editor, ui, classes, activeClas
             <i className="dot" style={{ background: c.color }} />{c.name}<kbd>{c.digit}</kbd>
           </button>
         ))}
+        {canWrite && !detail?.deleted && (
+          <>
+            <span className="tb-div" />
+            <button id="refresh-assisted" className="tbtn" disabled={!detail || refreshing} title="Vuelve a ejecutar el modelo o flujo del etiquetado asistido sobre esta imagen: reemplaza las cajas propuestas que aún no etiquetaste y conserva lo que ya hiciste (el detector se elige en Gestión → Asistido)" onClick={onRefresh} {...nb}><Icon name="refresh" size={16} />{refreshing ? "Detectando…" : "Refrescar asistido"}</button>
+          </>
+        )}
         {canTrash && !detail?.deleted && (
           <>
             <span className="tb-div" />

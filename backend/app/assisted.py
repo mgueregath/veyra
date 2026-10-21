@@ -152,3 +152,42 @@ def rank_uncertain(db: Session, project: Project, model_id: int, limit: int) -> 
             reasons.append("el detector ve algo que el modelo no")
         out.append({"frame_id": fid, "score": round(score, 4), "uncertainty": round(unc, 4), "reasons": reasons})
     return sorted(out, key=lambda d: -d["score"])[:limit]
+
+
+class NoDetector(ValueError):
+    pass
+
+
+def default_detector(project: Project) -> tuple[str, int]:
+    """Detector del etiquetado asistido del proyecto: («model»|«flow», id). Se define en Gestión → Asistido."""
+    cfg = (project.config or {}).get("assisted") or {}
+    for kind in ("flow", "model"):
+        if cfg.get(f"{kind}_id"):
+            return kind, int(cfg[f"{kind}_id"])
+    raise NoDetector("El proyecto no tiene un detector para el etiquetado asistido: elíjalo en Gestión → Asistido")
+
+
+def refresh_frame(db: Session, project: Project, frame_id: int, min_score: float = 0.15) -> tuple[str, list[Proposal]]:
+    """Vuelve a correr el detector asistido sobre UNA imagen y reemplaza sus propuestas de ese detector."""
+    kind, did = default_detector(project)
+    tag = f"{kind}:{did}"
+    if kind == "flow":
+        f = db.get(DetectionFlow, did)
+        if not f or f.project_id != project.id:
+            raise NoDetector("El flujo del etiquetado asistido ya no existe: elija otro en Gestión → Asistido")
+        preds = flow_predictions(db, project, f.spec, [frame_id])
+    else:
+        preds = model_predictions(db, project, did, [frame_id])
+    db.execute(delete(Proposal).where(Proposal.frame_id == frame_id, Proposal.sources.contains([tag])))
+    new = []
+    for p in preds.get(frame_id, []):
+        if kind == "flow" or p.score >= min_score:
+            x, y, w, h = p.bbox
+            new.append(
+                Proposal(
+                    frame_id=frame_id, x=x, y=y, w=max(1, w), h=max(1, h), sources=[kind, tag], score=round(p.score, 4)
+                )
+            )
+    db.add_all(new)
+    db.flush()
+    return tag, new

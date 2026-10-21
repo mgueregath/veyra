@@ -417,6 +417,13 @@ function Assisted({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
     mutationFn: () => api.preannotate(project.id, { ...(isFlow ? { flow_id: Number(det.slice(5)) } : { model_id: mid }), scope, min_score: Number(minScore) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["runs", project.id] }),
   });
+  const flowsQ = useQuery({ queryKey: ["flows", project.id], queryFn: () => api.flows(project.id) });
+  const setDef = useMutation({
+    mutationFn: () => api.setAssisted(project.id, isFlow ? { flow_id: Number(det.slice(5)) } : { model_id: mid }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  });
+  const cur = project.config.assisted;
+  const defLabel = cur?.flow_id ? `flujo «${flowsQ.data?.find((f) => f.id === cur.flow_id)?.name ?? cur.flow_id}»` : cur?.model_id ? `modelo «${models.data?.find((m) => m.id === cur.model_id)?.name ?? cur.model_id}»` : "ninguno (elige uno y pulsa «Usar en el editor»)";
   const find = useMutation({ mutationFn: () => api.uncertain(project.id, mid, limit), onSuccess: (rows) => setPicked(rows.map((r) => r.frame_id)) });
   const workers = (members.data ?? []).filter((m) => m.role === "labeler" || m.role === "reviewer" || m.role === "admin");
   const assign = useMutation({
@@ -434,6 +441,11 @@ function Assisted({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
         <label>Puntaje mínimo <input title="Puntaje mínimo de las cajas que el modelo propone. Más bajo = más cajas y más ruido. Un flujo trae el mínimo de cada fuente" disabled={isFlow} type="text" id="as-min" value={minScore} onChange={(e) => setMinScore(e.target.value)} style={{ width: 60 }} /></label>
         <button title="Ejecuta el modelo sobre las imágenes y guarda sus cajas como propuestas, que aparecen sin etiquetar con la fuente «modelo»" className="primary" id="as-pre" disabled={!isAdmin && project.role !== "reviewer" || pre.isPending} onClick={() => pre.mutate()}>Preanotar</button>
       </div>
+      <div className="formrow">
+        <button className="btn" id="as-default" disabled={!isAdmin && project.role !== "reviewer" || setDef.isPending} title="Este detector es el que usa el botón «Refrescar asistido» del editor, que vuelve a ejecutarlo sobre la imagen que estás viendo" onClick={() => setDef.mutate()}>Usar en el editor</button>
+        <span className="mut" id="as-default-now">En el editor ahora: {defLabel}</span>
+      </div>
+      {setDef.error && <p className="err">{(setDef.error as Error).message}</p>}
       {pre.error && <p className="err" id="as-err">{(pre.error as Error).message}</p>}
       <table className="tbl" id="as-runs">
         <thead><tr><th>Preanotación</th><th>Estado</th><th>Avance</th><th>Cajas propuestas</th></tr></thead>

@@ -10,7 +10,7 @@ import TopNav from "../components/TopNav";
 import Icon from "../components/Icon";
 import VideoTab from "../components/VideoTab";
 import { BoxEditor } from "../editor/BoxEditor";
-import { countLabels, docFromFrame, docToAnnotation, positiveClasses, type EditDoc } from "../editor/model";
+import { applyRefresh, countLabels, docFromFrame, docToAnnotation, positiveClasses, type EditDoc } from "../editor/model";
 import { fmtT, VideoPlayer } from "../editor/player";
 import { Saver } from "../editor/saver";
 import { useTick } from "../editor/useTick";
@@ -245,6 +245,23 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   const trashed = !!detail?.deleted;
   trashedRef.current = trashed;
   const refreshLists = () => { for (const k of ["frames", "stats", "projects"]) void qc.invalidateQueries({ queryKey: [k] }); };
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshAssisted = async () => {
+    const id = curId, ed = editorRef.current;
+    if (id === null || !ed?.doc || refreshing) return;
+    setRefreshing(true);
+    try {
+      const r = await api.refreshAssisted(id);
+      if (curRef.current !== id || ed.doc == null) return;
+      const { removed, added } = applyRefresh(ed.doc, r.tag, r.proposals);
+      docs.current.set(id, ed.doc);
+      ed.replaceDoc(ed.doc);
+      if (detail?.annotation && (removed || added)) { saver.queue(id, docToAnnotation(ed.doc)); patchItem(id, ed.doc); } // sin anotación guardada, las propuestas siguen siendo solo una vista
+      void qc.invalidateQueries({ queryKey: ["frame", id] });
+      playerRef.current?.notice(`Asistido refrescado: ${added} cajas nuevas${removed ? `, ${removed} reemplazadas` : ""}.`, false, true);
+    } catch (e) { playerRef.current?.notice("No se pudo refrescar el asistido: " + (e as Error).message, true); }
+    finally { setRefreshing(false); }
+  };
   const neighbour = () => { const fs = framesRef.current, i = curIdx(); return (fs[i + 1] ?? fs[i - 1])?.id ?? null; };
   const trashNow = async () => {
     if (curId === null) return;
@@ -283,7 +300,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   return (
     <div className="lp2">
       <TopNav project={project} user={user} active="label" onProjects={onExit} onLabel={() => undefined} onModels={onModels} onAdmin={onAdmin} onHelp={() => setHelp(true)} onLogout={onLogout} />
-      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} collab={collab} canTrash={canTrash} onTrash={() => setConfirmDel(true)} onClass={setClass} />
+      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} collab={collab} canTrash={canTrash} onTrash={() => setConfirmDel(true)} onClass={setClass} onRefresh={() => void refreshAssisted()} refreshing={refreshing} />
       <div id="main">
         <div id="stage">
           <canvas id="cv" ref={canvasRef} />

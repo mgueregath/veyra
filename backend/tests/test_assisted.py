@@ -118,3 +118,27 @@ def test_uncertain_skips_reviewed_and_frames_without_model_boxes(client, world, 
     save(as_user("ana"), a.id, [box()])  # a ya está revisada
     rows = admin.get(f"/api/projects/{pid}/uncertain", params={"model_id": mid}).json()
     assert [r["frame_id"] for r in rows] == [b.id]  # solo lo que falta por revisar y que el modelo vio
+
+
+def test_refresh_assisted_labeling_of_one_frame(client, world, db, fake_workers):
+    from app.models import Frame, Proposal
+
+    admin, pid, vid = trainable_world(db, world)
+    mid = train_model(admin, pid, vid)
+    fid = db.query(Frame).filter(Frame.project_id == pid).first().id
+    r = admin.post(f"/api/frames/{fid}/assisted")
+    assert r.status_code == 422 and "Gestión → Asistido" in r.json()["detail"]  # sin detector elegido
+    assert admin.put(f"/api/projects/{pid}/assisted", json={"model_id": mid, "flow_id": 1}).status_code == 422
+    assert admin.put(f"/api/projects/{pid}/assisted", json={"model_id": 9999}).status_code == 404
+    assert admin.put(f"/api/projects/{pid}/assisted", json={"model_id": mid}).json() == {"assisted": {"model_id": mid}}
+    assert next(x for x in admin.get("/api/projects").json() if x["id"] == pid)["config"]["assisted"] == {
+        "model_id": mid
+    }
+    for _ in range(2):  # repetir reemplaza, no acumula
+        r = admin.post(f"/api/frames/{fid}/assisted")
+        assert r.status_code == 200, r.text
+        assert r.json()["tag"] == f"model:{mid}" and r.json()["proposals"]
+    db.expire_all()
+    mine = [p for p in db.query(Proposal).filter(Proposal.frame_id == fid) if f"model:{mid}" in p.sources]
+    assert len(mine) == len(r.json()["proposals"])
+    assert admin.put(f"/api/projects/{pid}/assisted", json={}).json() == {"assisted": None}

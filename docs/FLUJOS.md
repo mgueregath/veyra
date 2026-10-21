@@ -61,3 +61,13 @@ La sesión con flujo corre en el worker dentro de un contenedor de la imagen del
 se desarrollaron los procedimientos), con el repositorio y los datos en solo lectura y GPU. Se publica solo el puerto de la sesión.
 A diferencia de los procedimientos por lotes, el contenedor **tiene red** (las cámaras la necesitan). Requiere un worker con
 `workspace` entre sus tipos de trabajo; `POST …/live` acepta `flow_id` (excluyente con `model_id`).
+
+## Dónde se elige el detector
+
+| Uso | Dónde |
+|---|---|
+| Etiquetado asistido por lotes | Gestión → Asistido: «Detector» (modelo o flujo) y «Preanotar» |
+| Botón «Refrescar asistido» del editor (una imagen) | Gestión → Asistido: elegir el detector y pulsar «Usar en el editor» |
+| Imágenes, video y cámara | Modelos → Ejecutar modelo: selector «Detector» (modelo o flujo, por separado en cada fuente) |
+
+«Refrescar asistido» reemplaza las cajas del detector que aún no etiquetaste y conserva las etiquetadas, movidas o manuales.

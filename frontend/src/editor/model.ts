@@ -67,6 +67,31 @@ export function docFromFrame(f: FrameDetail): EditDoc {
   };
 }
 
+const iouOf = (a: Box, b: Box) => {
+  const iw = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]), ih = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+  if (iw <= 0 || ih <= 0) return 0;
+  const inter = iw * ih;
+  return inter / (a[2] * a[3] + b[2] * b[3] - inter);
+};
+
+/**
+ * Refresca el etiquetado asistido: quita las cajas del detector (`tag`) que aún no se etiquetaron ni tocaron y agrega las nuevas.
+ * Lo que la persona ya hizo (etiquetadas, movidas, manuales, de otras fuentes) se conserva; una propuesta nueva que coincide
+ * con una caja ya trabajada (etiquetada, movida, manual o borrada) no se duplica. Devuelve cuántas se quitaron y cuántas se agregaron.
+ */
+export function applyRefresh(d: EditDoc, tag: string, proposals: { id: number; bbox: Box; sources: string[]; score: number | null }[]) {
+  const before = d.boxes.length;
+  d.boxes = d.boxes.filter((b) => b.manual || b.label !== null || b.orig_bbox !== null || !b.sources.includes(tag));
+  const removed = before - d.boxes.length;
+  let added = 0;
+  for (const p of proposals) {
+    if (d.boxes.some((b) => (b.manual || b.label !== null || b.orig_bbox !== null) && iouOf(b.bbox, p.bbox as Box) >= 0.5) || d.deleted.some((b) => iouOf(b.bbox, p.bbox as Box) >= 0.5)) continue;
+    d.boxes.push({ bbox: [...p.bbox] as Box, label: null, manual: false, sources: [...p.sources], score: p.score, proposal_id: p.id, orig_bbox: null });
+    added++;
+  }
+  return { removed, added };
+}
+
 export function docToAnnotation(d: EditDoc): Annotation {
   return { reviewed: d.reviewed, boxes: [...d.boxes.map((b) => fromE(b, false)), ...d.deleted.map((b) => fromE(b, true))] };
 }

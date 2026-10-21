@@ -1,6 +1,6 @@
 [project]
 name = "labelhub"
-version = "0.4.0"
+version = "0.4.1"
 description = "Plataforma multiusuario de etiquetado, entrenamiento y detección en vivo"
 requires-python = ">=3.10"
 dependencies = [

@@ -143,6 +143,15 @@ export class BoxEditor {
     img.src = imageUrl;
     this.draw();
   }
+  /** Cambia las cajas de la imagen actual sin mover el zoom ni recargar la imagen. */
+  replaceDoc(doc: M.EditDoc) {
+    this.doc = doc;
+    this.sel = -1;
+    this.hov = -1;
+    this.undoBox = null;
+    this.rev++;
+    this.draw();
+  }
   get imgW() { return this.img?.naturalWidth ?? 0; }
   get imgH() { return this.img?.naturalHeight ?? 0; }
 

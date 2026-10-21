@@ -2,7 +2,7 @@ export interface Me { id: number; username: string; display_name: string | null;
 export interface ClassDef { id: string; name: string; key?: string; digit?: string; color: string; negative?: boolean }
 export interface SourceDef { short: string; name: string }
 export type WorkMode = "review" | "collab";
-export interface ProjectConfig { classes: ClassDef[]; box_sources?: Record<string, SourceDef>; description?: string; mode?: WorkMode }
+export interface ProjectConfig { classes: ClassDef[]; box_sources?: Record<string, SourceDef>; description?: string; mode?: WorkMode; assisted?: { model_id?: number; flow_id?: number } }
 export interface Project { id: number; slug: string; name: string; role: string; config: ProjectConfig; n_frames: number; n_reviewed: number; cover_frame_id: number | null }
 export interface ProjectPatch { name?: string; description?: string; classes?: Partial<ClassDef>[]; mode?: WorkMode }
 export interface Proposal { id: number; bbox: [number, number, number, number]; sources: string[]; score: number | null }
@@ -127,6 +127,8 @@ export const api = {
   projectVideos: (pid: number) => req<ProjectVideo[]>(`/api/projects/${pid}/videos`),
   liveList: (pid: number) => req<LiveSession[]>(`/api/projects/${pid}/live`),
   liveStart: (pid: number, body: { source_kind: "video" | "url"; video_id?: number; url?: string; model_id?: number | null; flow_id?: number | null; threshold: number; imgsz: number; name?: string }) => req<LiveSession>(`/api/projects/${pid}/live`, { method: "POST", body: JSON.stringify(body) }),
+  setAssisted: (pid: number, body: { model_id?: number; flow_id?: number }) => req<{ assisted: { model_id?: number; flow_id?: number } | null }>(`/api/projects/${pid}/assisted`, { method: "PUT", body: JSON.stringify(body) }),
+  refreshAssisted: (frameId: number) => req<{ tag: string; proposals: Proposal[] }>(`/api/frames/${frameId}/assisted`, { method: "POST" }),
   liveGet: (id: number) => req<LiveSession>(`/api/live/${id}`),
   liveControl: (id: number, body: { threshold?: number; paused?: boolean; record?: boolean; show_boxes?: boolean; show_conf?: boolean; show_classes?: number[] | null }) => req<{ threshold: number; paused: boolean; recording: boolean }>(`/api/live/${id}/control`, { method: "POST", body: JSON.stringify(body) }),
   liveSave: (id: number) => req<{ frame_id: number; position: number; boxes: number }>(`/api/live/${id}/save-frame`, { method: "POST" }),
