@@ -213,7 +213,7 @@ def start_workspace(
     try:
         worker = remote.pick_worker(db, "workspace", force=True)
     except remote.RemoteUnavailable:
-        raise HTTPException(503, "No hay ningún worker de GPU en línea que ofrezca espacios de trabajo") from None
+        raise HTTPException(424, "No hay ningún worker de GPU en línea que ofrezca espacios de trabajo") from None
     w.job_id = remote.submit(
         "workspace",
         {

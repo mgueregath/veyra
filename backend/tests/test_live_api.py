@@ -215,7 +215,7 @@ def test_failed_start_is_recorded(client, live_world, db, monkeypatch):
     monkeypatch.setattr(settings, "live_script", settings.live_script.parent / "no_existe.py")
     adm = as_user("adm")
     r = start(adm, live_world)
-    assert r.status_code == 502 and "no arrancó" in r.json()["detail"]
+    assert r.status_code == 424 and "no arrancó" in r.json()["detail"]
     s = db.query(LiveSession).one()
     assert s.status == "failed" and s.error
 
@@ -262,7 +262,7 @@ def test_start_tolerates_warnings_before_ready_and_reports_slow_start(client, li
     monkeypatch.setattr(settings, "live_script", silent)
     monkeypatch.setattr(settings, "live_start_timeout", 1.0)
     r = start(adm, live_world)
-    assert r.status_code == 502 and "cargando modelo" in r.json()["detail"]
+    assert r.status_code == 424 and "cargando modelo" in r.json()["detail"]
 
 
 def test_session_token_never_looks_like_a_command_line_option():

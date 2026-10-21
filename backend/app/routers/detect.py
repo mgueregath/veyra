@@ -214,7 +214,8 @@ def _run(db: Session, user: User, p: Project, t: Target, rows: list[dict], batch
     try:
         preds = _predict(db, p, t, rows)
     except RuntimeError as e:
-        raise HTTPException(502, str(e)) from None
+        # 424 y no 502: el proxy de entrada (NPM) cambia las respuestas 502/503 por su página y se perdería el motivo
+        raise HTTPException(424, str(e)) from None
     result = _items(t, batch, rows, preds)
     _save(batch, p.id, user, result)
     db.add(

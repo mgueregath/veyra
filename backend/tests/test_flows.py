@@ -328,7 +328,7 @@ def test_a_failing_procedure_reports_why(client, world, db, trained, monkeypatch
     )
     fid = make_flow(admin, pid, "roto", leaf("procedure:manchas"))
     r = admin.post(f"/api/projects/{pid}/detect", json={"flow_id": fid, "first": 1})
-    assert r.status_code == 502 and "manchas" in r.json()["detail"] and "ModuleNotFoundError" in r.json()["detail"]
+    assert r.status_code == 424 and "manchas" in r.json()["detail"] and "ModuleNotFoundError" in r.json()["detail"]
     w.stop.set()
 
 
@@ -336,5 +336,5 @@ def test_procedure_flow_without_workers_is_refused_clearly(client, world, db, tr
     admin, pid, mid = trained
     fid = make_flow(admin, pid, "sin worker", group("or", leaf(f"model:{mid}"), leaf("procedure:manchas")))
     r = admin.post(f"/api/projects/{pid}/detect", json={"flow_id": fid, "first": 1})
-    assert r.status_code == 502 and "worker" in r.json()["detail"].lower()
+    assert r.status_code == 424 and "worker" in r.json()["detail"].lower()
     assert db.query(DetectionFlow).count() == 1

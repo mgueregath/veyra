@@ -294,7 +294,7 @@ def test_predict_times_out_when_no_worker_takes_the_job(client, world, db, remot
     c, _ = make_worker()
     c.post("/api/worker/register", json={"kinds": ["predict"]})  # en línea, pero nunca reclama
     r = admin.post(f"/api/projects/{pid}/detect", json={"model_id": mid, "first": 1})
-    assert r.status_code == 502 and "ningún worker" in r.json()["detail"]
+    assert r.status_code == 424 and "ningún worker" in r.json()["detail"]
 
 
 # ---------------------------------------------------------------- en vivo remoto
@@ -397,4 +397,4 @@ def test_live_without_workers_in_remote_mode_is_refused(client, world, db, vfr_v
     r = as_user("adm").post(
         f"/api/projects/{world['project'].id}/live", json={"source_kind": "video", "video_id": v.id, "threshold": 0.25}
     )
-    assert r.status_code in (502, 503) and "worker" in r.json()["detail"].lower()
+    assert r.status_code == 424 and "worker" in r.json()["detail"].lower()

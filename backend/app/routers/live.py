@@ -133,7 +133,7 @@ def start_session(project_id: int, body: LiveIn, user: User = Depends(current_us
     except RuntimeError as e:
         s.status, s.error, s.ended_at = "failed", str(e), dt.datetime.now(dt.timezone.utc)
         db.commit()
-        raise HTTPException(502, str(e)) from None
+        raise HTTPException(424, str(e)) from None
     s.status = "running"
     db.add(
         AuditLog(

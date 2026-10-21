@@ -84,7 +84,7 @@ def test_start_needs_a_key_and_a_worker(client, world, ws_worker):
     assert r.status_code == 422 and "llave" in r.json()["detail"]
     add_key(adm)
     r = adm.post(f"/api/projects/{pid}/workspace/start")
-    assert r.status_code == 503 and "worker" in r.json()["detail"]
+    assert r.status_code == 424 and "worker" in r.json()["detail"]
     assert adm.get(f"/api/projects/{pid}/workspace").json()["worker_available"] is False
 
 
