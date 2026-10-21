@@ -10,7 +10,7 @@ services:
       POSTGRES_DB: labelhub
       POSTGRES_PASSWORD: ${VEYRA_DB_PASSWORD:?defínela en .env}
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql/data:z   # :z por SELinux (AlmaLinux)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U labelhub -d labelhub"]
       interval: 5s
