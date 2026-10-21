@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type DetectResult, type LiveSession, type LiveStats, type Project } from "../api/client";
+import { DetectorSelect } from "../components/Flows";
 import Icon from "../components/Icon";
 import TopNav from "../components/TopNav";
 
@@ -35,6 +36,7 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
   const [imgsz, setImgsz] = useState(1280);
   const [sel, setSel] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ t: string; ok: boolean } | null>(null);
+  const [flowId, setFlowId] = useState<number | null>(null); // en imágenes se puede correr un flujo (modelos, filtros y procedimientos con O / Y)
   const [imgMode, setImgMode] = useState<"project" | "upload">("project");
   const [first, setFirst] = useState(1);
   const [last, setLast] = useState<number | "">("");
@@ -66,7 +68,9 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
     onError: (e) => setMsg({ t: (e as Error).message, ok: false }),
   });
   const detect = useMutation({
-    mutationFn: () => (imgMode === "upload" ? api.detectUpload(project.id, modelId, upload) : api.detectFrames(project.id, { model_id: modelId, first, last: last === "" ? first : last })),
+    mutationFn: () => (imgMode === "upload"
+      ? api.detectUpload(project.id, flowId !== null ? { flow_id: flowId } : { model_id: modelId }, upload)
+      : api.detectFrames(project.id, { ...(flowId !== null ? { flow_id: flowId } : { model_id: modelId }), first, last: last === "" ? first : last })),
     onSuccess: (r) => { setResult(r); setIdx(0); setMsg(null); },
     onError: (e) => setMsg({ t: (e as Error).message, ok: false }),
   });
@@ -91,7 +95,9 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
   };
 
   const live = source !== "images";
-  const classIds = model?.classes ?? [];
+  const blank = !!result?.items.some((i) => i.dets.some((d) => !d.label)); // detecciones sin clase (apariencia, procedimientos…)
+  const classIds = flowId !== null && result ? [...result.classes, ...(blank ? [""] : [])] : model?.classes ?? [];
+  const nameOf = (c: string) => cdef(c)?.name ?? (c || "Detección");
   // visualización: en vivo la dibuja el proceso (se le pide por control); con imágenes se dibuja aquí
   const vBoxes = live && running ? st?.show_boxes ?? true : showBoxes;
   const vConf = live && running ? st?.show_conf ?? true : showConf;
@@ -172,8 +178,8 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
                       <img src={item.image_url} alt={item.name} />
                       <svg viewBox={`0 0 ${item.width} ${item.height}`} preserveAspectRatio="none">
                         {showBoxes && shownDets.map((d, i) => {
-                          const col = cdef(d.label)?.color ?? "#22c55e", fs = Math.max(14, item.width / 55);
-                          const label = `${cdef(d.label)?.name ?? d.label}${showConf ? ` ${d.score.toFixed(2).replace(".", ",")}` : ""}`;
+                          const col = cdef(d.label)?.color ?? "#78455f", fs = Math.max(14, item.width / 55);
+                          const label = `${nameOf(d.label)}${showConf ? ` ${d.score.toFixed(2).replace(".", ",")}` : ""}`;
                           return <g key={i} className="det"><rect x={d.bbox[0]} y={d.bbox[1]} width={d.bbox[2]} height={d.bbox[3]} fill="none" stroke={col} strokeWidth={Math.max(2, item.width / 500)} /><rect x={d.bbox[0]} y={Math.max(0, d.bbox[1] - fs * 1.5)} width={label.length * fs * 0.6 + 10} height={fs * 1.5} fill={col} /><text x={d.bbox[0] + 5} y={Math.max(fs, d.bbox[1] - fs * 0.4)} fontSize={fs} fill="#fff" fontWeight={600}>{label}</text></g>;
                         })}
                       </svg>
@@ -198,7 +204,7 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
                 <h2><span>Detecciones</span></h2>
                 <table className="tbl" id="img-dets">
                   <thead><tr><th>Clase</th><th>Confianza</th><th>Caja (x, y, ancho, alto)</th></tr></thead>
-                  <tbody>{shownDets.map((d, i) => <tr key={i}><td><i className="dot" style={{ background: cdef(d.label)?.color ?? "#999" }} /> {cdef(d.label)?.name ?? d.label}</td><td>{(100 * d.score).toFixed(0)} %</td><td>{d.bbox.join(", ")}</td></tr>)}
+                  <tbody>{shownDets.map((d, i) => <tr key={i}><td><i className="dot" style={{ background: cdef(d.label)?.color ?? "#78455f" }} /> {nameOf(d.label)}</td><td>{(100 * d.score).toFixed(0)} %</td><td>{d.bbox.join(", ")}</td></tr>)}
                     {!shownDets.length && <tr><td colSpan={3} className="emptyrow">Sin detecciones con este umbral. Bájalo para ver más.</td></tr>}</tbody>
                 </table>
               </section>
@@ -220,8 +226,8 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
             <h2><span>Configuración de ejecución</span></h2>
             {operate && (
               <>
-                <label className="fld">Modelo
-                  <select id="lv-model" disabled={busy} value={modelId} onChange={(e) => onPickModel(Number(e.target.value))}>{(models.data ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+                <label className="fld">Detector
+                  <DetectorSelect project={project} id="lv-model" disabled={busy} value={flowId !== null ? `flow:${flowId}` : `model:${modelId}`} onChange={(v) => { if (v.startsWith("flow:")) { setFlowId(Number(v.slice(5))); setResult(null); } else { setFlowId(null); if (Number(v.slice(6)) !== modelId) onPickModel(Number(v.slice(6))); } }} /></label>
                 <div className="fld">Fuente de entrada
                   <div className="segmented" role="group" aria-label="Fuente de entrada">
                     {(["video", "url", "images"] as const).map((k) => <button key={k} id={"lv-kind-" + k} className={source === k ? "on" : ""} disabled={busy && source !== k} title={{ video: "Un video grabado del proyecto, reproducido como si fuera en directo", url: "Una cámara de red en directo (RTSP o MJPEG)", images: "Una imagen o un conjunto de imágenes" }[k]} onClick={() => { setSource(k); setMsg(null); if (k !== "images") setSel(null); }}>{SOURCE_LABEL[k]}</button>)}
@@ -256,22 +262,23 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
               <label className="fld">Resolución de entrada
                 <select id="lv-imgsz" disabled={busy || source === "images"} title="Resolución a la que corre el modelo: más baja va más rápido, más alta ve mejor lo pequeño" value={imgsz} onChange={(e) => setImgsz(+e.target.value)}>{[...new Set([640, 960, 1280, 1600, 1920, imgsz])].sort((a, b) => a - b).map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
             )}
+            {operate && live && flowId !== null && <p className="note warnt" id="flow-live-note"><Icon name="alert" size={15} /> Los flujos funcionan sobre imágenes. Para video o cámara en vivo elige un modelo (el soporte de flujos en vivo viene después).</p>}
             {operate && running && live && <p className="note"><Icon name="info" size={15} /> Detén la sesión para cambiar la fuente o la resolución.</p>}
             {operate && (source === "images"
               ? <button className="primary big" id="lv-start" disabled={detect.isPending || (imgMode === "upload" && !upload.length)} onClick={() => detect.mutate()}>{detect.isPending ? "Detectando…" : "Detectar imágenes"}</button>
-              : !running && <button className="primary big" id="lv-start" title="Inicia la sesión: arranca el proceso, carga el modelo y abre la fuente (puede tardar unos segundos)" disabled={start.isPending || (source === "url" && !url) || (source === "video" && !files.length)} onClick={() => start.mutate()}>{start.isPending ? "Iniciando (carga el modelo)…" : source === "video" ? "Iniciar ejecución" : "Iniciar en vivo"}</button>)}
+              : !running && <button className="primary big" id="lv-start" title="Inicia la sesión: arranca el proceso, carga el modelo y abre la fuente (puede tardar unos segundos)" disabled={flowId !== null || start.isPending || (source === "url" && !url) || (source === "video" && !files.length)} onClick={() => start.mutate()}>{start.isPending ? "Iniciando (carga el modelo)…" : source === "video" ? "Iniciar ejecución" : "Iniciar en vivo"}</button>)}
 
             <hr />
             <h3>{live ? "Únicos en la sesión" : "En esta imagen"}<small>{live ? "Objetos distintos confirmados." : "Con el umbral actual."}</small></h3>
             <div className="countlist" id="run-counts">
-              {classIds.map((c) => <div key={c}><span><i className="dot" style={{ background: cdef(c)?.color ?? "#999" }} />{cdef(c)?.name ?? c}</span><b>{counts[c] ?? 0}</b></div>)}
+              {classIds.map((c) => <div key={c}><span><i className="dot" style={{ background: cdef(c)?.color ?? "#78455f" }} />{nameOf(c)}</span><b>{counts[c] ?? 0}</b></div>)}
             </div>
             <hr />
             <h3>Visualización</h3>
             <label className="togrow">Mostrar cajas<span className="switch"><input type="checkbox" id="vz-boxes" disabled={!operate} checked={vBoxes} onChange={(e) => toggleBoxes(e.target.checked)} /><i /></span></label>
             <label className="togrow">Mostrar confianza<span className="switch"><input type="checkbox" id="vz-conf" disabled={!operate} checked={vConf} onChange={(e) => toggleConf(e.target.checked)} /><i /></span></label>
             <div className="fld">Clases a mostrar
-              <div className="chips" id="vz-classes">{classIds.map((c) => <button key={c} className={"chip2 toggle" + (vHidden.includes(c) ? " off" : "")} disabled={!operate} aria-pressed={!vHidden.includes(c)} title="Mostrar u ocultar las cajas de esta clase" onClick={() => toggleClass(c)}><i className="dot" style={{ background: cdef(c)?.color ?? "#999" }} />{cdef(c)?.name ?? c}</button>)}</div></div>
+              <div className="chips" id="vz-classes">{classIds.map((c) => <button key={c} className={"chip2 toggle" + (vHidden.includes(c) ? " off" : "")} disabled={!operate} aria-pressed={!vHidden.includes(c)} title="Mostrar u ocultar las cajas de esta clase" onClick={() => toggleClass(c)}><i className="dot" style={{ background: cdef(c)?.color ?? "#78455f" }} />{nameOf(c)}</button>)}</div></div>
             <hr />
             <h3>Estado</h3>
             <p className={"runstate " + stateCls} id="run-state"><i className="dot" />{stateText}</p>

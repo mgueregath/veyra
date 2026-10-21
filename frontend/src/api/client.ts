@@ -46,7 +46,7 @@ export interface LiveSession {
 }
 export interface Detection { bbox: [number, number, number, number]; label: string; score: number }
 export interface DetectItem { index: number; name: string; frame_id: number | null; width: number; height: number; image_url: string; dets: Detection[] }
-export interface DetectResult { id: string; model_id: number; model: string; classes: string[]; items: DetectItem[] }
+export interface DetectResult { id: string; model_id: number | null; flow_id?: number | null; model: string; classes: string[]; items: DetectItem[] }
 export interface GpuWorker { id: number; name: string; active: boolean; online: boolean; kinds: string[]; max_batch: number; max_live: number; capabilities: { gpus?: { name: string; memory_mb: number }[]; torch?: string | null; ultralytics?: string | null; version?: string }; last_seen: string | null; running_jobs: number }
 export interface SshKeyInfo { id: number; name: string; type: string; fingerprint: string; created_at: string }
 export interface WorkspaceState {
@@ -54,6 +54,12 @@ export interface WorkspaceState {
   worker_available: boolean; host?: string; user?: string; workdir?: string; last_stop?: string; autosave?: string;
   ssh_config?: string; vscode_url?: string; vscode_cmd?: string; keys?: { with_key: string[]; without_key: string[] };
 }
+export interface FlowLeaf { source: string; min_score?: number; ref?: string | null; params?: Record<string, unknown> }
+export interface FlowGroup { op: "or" | "and"; inputs: FlowNode[]; iou?: number; score?: "max" | "mean" | "min" | null }
+export type FlowNode = FlowLeaf | FlowGroup;
+export interface Flow { id: number; name: string; spec: FlowNode; text: string; updated_at: string }
+export interface Procedure { name: string; entry: string; doc: string; params: Record<string, unknown> }
+export interface ProcedureList { available: boolean; procedures: Procedure[]; ref: string | null; error: string | null }
 export interface ProjectVideo { id: number; name: string; has_file: boolean }
 export interface TeamMember { username: string; display_name: string | null; active: boolean; role: string }
 export interface Usage { images: { files: number; bytes: number }; videos: { files: number; bytes: number }; models: { bytes: number }; exports: { bytes: number }; owned_bytes: number; quota_bytes: number | null; over_quota: boolean }
@@ -115,7 +121,7 @@ export const api = {
   run: (id: number) => req<RunSummary>(`/api/runs/${id}`),
   train: (pid: number, body: { dataset_version_id: number; arch: string; epochs: number; imgsz: number; batch: number; model_name?: string }) => req<{ run_id: number; model_name: string; status: string }>(`/api/projects/${pid}/trainings`, { method: "POST", body: JSON.stringify(body) }),
   cancelRun: (id: number) => req<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),
-  preannotate: (pid: number, body: { model_id: number; scope: "unreviewed" | "all"; min_score: number }) => req<{ run_id: number; status: string }>(`/api/projects/${pid}/preannotations`, { method: "POST", body: JSON.stringify(body) }),
+  preannotate: (pid: number, body: { model_id?: number; flow_id?: number; scope: "unreviewed" | "all"; min_score: number }) => req<{ run_id: number; status: string }>(`/api/projects/${pid}/preannotations`, { method: "POST", body: JSON.stringify(body) }),
   uncertain: (pid: number, modelId: number, limit: number) => req<UncertainItem[]>(`/api/projects/${pid}/uncertain?model_id=${modelId}&limit=${limit}`),
   models: (pid: number) => req<ModelInfo[]>(`/api/projects/${pid}/models`),
   projectVideos: (pid: number) => req<ProjectVideo[]>(`/api/projects/${pid}/videos`),
@@ -126,10 +132,11 @@ export const api = {
   liveSave: (id: number) => req<{ frame_id: number; position: number; boxes: number }>(`/api/live/${id}/save-frame`, { method: "POST" }),
   liveStop: (id: number) => req<LiveSession>(`/api/live/${id}`, { method: "DELETE" }),
   liveClips: (id: number) => req<{ name: string; bytes: number }[]>(`/api/live/${id}/clips`),
-  detectFrames: (pid: number, body: { model_id: number; first: number; last?: number }) => req<DetectResult>(`/api/projects/${pid}/detect`, { method: "POST", body: JSON.stringify(body) }),
-  detectUpload: async (pid: number, modelId: number, files: File[]): Promise<DetectResult> => {
+  detectFrames: (pid: number, body: { model_id?: number; flow_id?: number; first: number; last?: number }) => req<DetectResult>(`/api/projects/${pid}/detect`, { method: "POST", body: JSON.stringify(body) }),
+  detectUpload: async (pid: number, target: { model_id?: number; flow_id?: number }, files: File[]): Promise<DetectResult> => {
     const fd = new FormData();
-    fd.append("model_id", String(modelId));
+    if (target.model_id !== undefined) fd.append("model_id", String(target.model_id));
+    if (target.flow_id !== undefined) fd.append("flow_id", String(target.flow_id));
     files.forEach((f) => fd.append("files", f));
     const r = await fetch(`/api/projects/${pid}/detect/upload`, { method: "POST", body: fd, credentials: "same-origin" });
     if (!r.ok) {
@@ -139,6 +146,11 @@ export const api = {
     }
     return r.json() as Promise<DetectResult>;
   },
+  flows: (pid: number) => req<Flow[]>(`/api/projects/${pid}/flows`),
+  createFlow: (pid: number, body: { name: string; spec: FlowNode }) => req<Flow>(`/api/projects/${pid}/flows`, { method: "POST", body: JSON.stringify(body) }),
+  updateFlow: (pid: number, id: number, body: { name: string; spec: FlowNode }) => req<Flow>(`/api/projects/${pid}/flows/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteFlow: (pid: number, id: number) => req<{ ok: boolean }>(`/api/projects/${pid}/flows/${id}`, { method: "DELETE" }),
+  procedures: (pid: number) => req<ProcedureList>(`/api/projects/${pid}/procedures`),
   workers: () => req<{ mode: string; workers: GpuWorker[] }>("/api/admin/workers"),
   createWorker: (name: string) => req<GpuWorker & { token: string }>("/api/admin/workers", { method: "POST", body: JSON.stringify({ name }) }),
   revokeWorker: (id: number) => req<{ ok: boolean }>(`/api/admin/workers/${id}`, { method: "DELETE" }),

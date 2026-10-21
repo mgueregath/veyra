@@ -143,6 +143,18 @@ try:
     c.eval("document.getElementById('im-upload').click()"); time.sleep(0.3)
     check("«Subir» pide archivos y no deja detectar sin elegir ninguno", c.eval("!!document.getElementById('im-files')&&document.getElementById('lv-start').disabled"))
 
+    # ---- flujos sobre imágenes: modelo O modelo (mínimo 0,5) = las mismas dos cajas; AND con el mínimo = solo la segura
+    fl_or = root.call("POST", f"/api/projects/{PID}/flows", {"name": "dos fuentes", "spec": {"op": "and", "inputs": [{"source": f"model:{MID}"}, {"source": f"model:{MID}", "min_score": 0.5}]}})
+    c.eval("document.getElementById('lv-kind-images').click()"); time.sleep(0.3)
+    c.eval("location.reload()"); time.sleep(2.5); wait_for(c, "!!document.getElementById('lv-model-flows')")
+    c.eval("document.getElementById('lv-kind-images').click()"); time.sleep(0.3)
+    check("el selector de detector ofrece los flujos guardados", c.eval("[...document.querySelectorAll('#lv-model optgroup')].map(g=>g.label).join('|')") == "Modelos entrenados|Flujos (O / Y)")
+    c.eval("(()=>{const e=document.getElementById('lv-model');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(e,'flow:%d');e.dispatchEvent(new Event('change',{bubbles:true}))})()" % fl_or["id"]); time.sleep(0.3)
+    c.eval("document.getElementById('lv-start').click()")
+    check("detectar imágenes con un flujo muestra el resultado combinado (Y: solo la caja que ambas fuentes confirman)", wait_for(c, "!!document.querySelector('#img-view img')&&document.querySelectorAll('#img-view .det').length===1", 40), c.eval("document.querySelectorAll('#img-view .det').length"))
+    c.eval("document.getElementById('lv-kind-video').click()"); time.sleep(0.4)
+    check("con un flujo elegido, video y cámara avisan que de momento solo van con modelos y no se pueden iniciar", c.eval("!!document.getElementById('flow-live-note')&&document.getElementById('lv-start').disabled"))
+    c.eval("document.getElementById('lv-kind-images').click()"); time.sleep(0.2)
     # sesión viva para el lector
     run = root.call("POST", f"/api/projects/{PID}/live", {"source_kind": "video", "video_id": root.get(f"/api/projects/{PID}/videos")[0]["id"], "model_id": MID, "threshold": 0.25, "imgsz": 640, "no_realtime": True})
     wait_for(c, "true")

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "../components/Icon";
 import ModePicker from "../components/ModePicker";
+import { DetectorSelect } from "../components/Flows";
 import SshKeysModal from "../components/SshKeysModal";
 import TopNav from "../components/TopNav";
 import { api, type DatasetStats, type EvalExample, type Project, type RunSummary, type Status, type WorkMode } from "../api/client";
@@ -266,6 +267,7 @@ function Evaluation({ project, preset }: { project: Project; preset: string | nu
   const [version, setVersion] = useState<number | "">("");
   const [split, setSplit] = useState("test");
   const [detector, setDetector] = useState(preset ?? "baseline:appearance");
+  const flowsQ = useQuery({ queryKey: ["flows", project.id], queryFn: () => api.flows(project.id) });
   const [thr, setThr] = useState("");
   const [iou, setIou] = useState("0.5");
   const [open, setOpen] = useState<number | null>(null);
@@ -289,6 +291,7 @@ function Evaluation({ project, preset }: { project: Project; preset: string | nu
           <option value="baseline:appearance">Línea base: apariencia</option>
           <option value="baseline:motion">Línea base: movimiento</option>
           {(models.data ?? []).map((md) => <option key={md.id} value={`model:${md.id}`}>Modelo: {md.name}</option>)}
+          {(flowsQ.data ?? []).map((f) => <option key={f.id} value={`flow:${f.id}`}>Flujo: {f.name}</option>)}
         </select></label>
         <label>Umbral de puntaje <input title="Puntaje mínimo para contar una detección. Vacío: se usa el que da el mejor F1 y se informa cuál" type="text" id="ev-thr" placeholder="mejor F1" value={thr} onChange={(e) => setThr(e.target.value)} style={{ width: 80 }} /></label>
         <label>IoU <input title="Cuánto debe solaparse la caja detectada con la etiquetada para contar como acierto (IoU, de 0 a 1). 0,5 es el estándar; 0,3 es más permisivo con piojos pequeños" type="text" id="ev-iou" value={iou} onChange={(e) => setIou(e.target.value)} style={{ width: 56 }} /></label>
@@ -401,15 +404,17 @@ function Assisted({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
     queryKey: ["runs", project.id, "preannotation"], queryFn: () => api.runs(project.id, "preannotation"),
     refetchInterval: (q) => (q.state.data?.some((r) => RUN_ACTIVE.includes(r.status)) ? 1500 : false),
   });
-  const [model, setModel] = useState<number | "">("");
+  const [detector, setDetector] = useState("");
   const [scope, setScope] = useState<"unreviewed" | "all">("unreviewed");
   const [minScore, setMinScore] = useState("0.15");
   const [limit, setLimit] = useState(20);
   const [picked, setPicked] = useState<number[]>([]);
   const [who, setWho] = useState("");
-  const mid = Number(model || models.data?.[0]?.id || 0);
+  const det = detector || (models.data?.[0] ? `model:${models.data[0].id}` : "");
+  const isFlow = det.startsWith("flow:");
+  const mid = det.startsWith("model:") ? Number(det.slice(6)) : 0;
   const pre = useMutation({
-    mutationFn: () => api.preannotate(project.id, { model_id: mid, scope, min_score: Number(minScore) }),
+    mutationFn: () => api.preannotate(project.id, { ...(isFlow ? { flow_id: Number(det.slice(5)) } : { model_id: mid }), scope, min_score: Number(minScore) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["runs", project.id] }),
   });
   const find = useMutation({ mutationFn: () => api.uncertain(project.id, mid, limit), onSuccess: (rows) => setPicked(rows.map((r) => r.frame_id)) });
@@ -417,17 +422,16 @@ function Assisted({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
   const assign = useMutation({
     mutationFn: () => api.assign(project.id, { users: [who || workers[0]?.username], overlap_pct: 0, seed: 0, frame_ids: picked }),
   });
-  if (!models.data?.length) return <div className="panel" id="assist"><p className="mut">Todavía no hay modelos entrenados. Entrene uno en la pestaña «Entrenamiento».</p></div>;
+  const noFlows = !useQuery({ queryKey: ["flows", project.id], queryFn: () => api.flows(project.id) }).data?.length;
+  if (!models.data?.length && noFlows) return <div className="panel" id="assist"><p className="mut">Todavía no hay modelos entrenados ni flujos. Entrene un modelo en «Entrenamiento» o cree un flujo con detectores del proyecto.</p><DetectorSelect project={project} id="as-detector" value="" onChange={() => undefined} /></div>;
   return (
     <div className="panel" id="assist">
       <h2>Ciclo de mejora con el modelo</h2>
       <p className="mut">1) <b>Preanotar</b>: el modelo propone cajas en las imágenes sin revisar (aparecen como cajas sin etiquetar con la fuente «modelo»). 2) <b>Buscar inciertas</b>: las imágenes donde el modelo duda o discrepa del detector de apariencia, que conviene que mire una persona primero. 3) <b>Asignar</b> esas imágenes a quien etiquete, reentrenar y medir de nuevo en la misma partición test.</p>
       <div className="formrow">
-        <label>Modelo <select title="Modelo que propondrá las cajas" id="as-model" value={model} onChange={(e) => setModel(e.target.value === "" ? "" : Number(e.target.value))}>
-          {(models.data ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select></label>
+        <label>Detector <DetectorSelect project={project} id="as-model" value={det} onChange={setDetector} /></label>
         <label>Alcance <select title="Solo las imágenes que nadie ha revisado, o todas (reemplaza las propuestas anteriores de ese modelo)" id="as-scope" value={scope} onChange={(e) => setScope(e.target.value as "unreviewed" | "all")}><option value="unreviewed">solo sin revisar</option><option value="all">todas</option></select></label>
-        <label>Puntaje mínimo <input title="Puntaje mínimo de las cajas que el modelo propone. Más bajo = más cajas y más ruido" type="text" id="as-min" value={minScore} onChange={(e) => setMinScore(e.target.value)} style={{ width: 60 }} /></label>
+        <label>Puntaje mínimo <input title="Puntaje mínimo de las cajas que el modelo propone. Más bajo = más cajas y más ruido. Un flujo trae el mínimo de cada fuente" disabled={isFlow} type="text" id="as-min" value={minScore} onChange={(e) => setMinScore(e.target.value)} style={{ width: 60 }} /></label>
         <button title="Ejecuta el modelo sobre las imágenes y guarda sus cajas como propuestas, que aparecen sin etiquetar con la fuente «modelo»" className="primary" id="as-pre" disabled={!isAdmin && project.role !== "reviewer" || pre.isPending} onClick={() => pre.mutate()}>Preanotar</button>
       </div>
       {pre.error && <p className="err" id="as-err">{(pre.error as Error).message}</p>}
@@ -441,7 +445,7 @@ function Assisted({ project, isAdmin }: { project: Project; isAdmin: boolean }) 
       <h2>Imágenes que conviene etiquetar primero</h2>
       <div className="formrow">
         <label>Cuántas <input title="Cuántas imágenes mostrar en la lista" type="number" id="as-limit" min={1} max={200} value={limit} onChange={(e) => setLimit(+e.target.value)} style={{ width: 70 }} /></label>
-        <button title="Busca las imágenes sin revisar donde el modelo duda o discrepa del detector de apariencia: son las que más aportan al etiquetarlas" id="as-find" disabled={find.isPending} onClick={() => find.mutate()}>Buscar inciertas</button>
+        <button title={isFlow ? "La búsqueda de imágenes inciertas necesita un modelo (no un flujo)" : "Busca las imágenes sin revisar donde el modelo duda o discrepa del detector de apariencia: son las que más aportan al etiquetarlas"} id="as-find" disabled={find.isPending || isFlow} onClick={() => find.mutate()}>Buscar inciertas</button>
       </div>
       {find.error && <p className="err">{(find.error as Error).message}</p>}
       {find.data && (

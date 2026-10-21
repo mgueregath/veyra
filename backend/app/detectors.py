@@ -12,8 +12,8 @@ BASELINES = {"appearance": "blob", "motion": "motion"}  # nombre → fuente de l
 
 def parse_spec(spec: str) -> tuple[str, str]:
     kind, _, name = spec.partition(":")
-    if kind not in ("baseline", "model") or not name:
-        raise ValueError("detector inválido: use baseline:appearance, baseline:motion o model:<id>")
+    if kind not in ("baseline", "model", "flow") or not name:
+        raise ValueError("detector inválido: use baseline:appearance, baseline:motion, model:<id> o flow:<id>")
     return kind, name
 
 

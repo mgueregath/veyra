@@ -105,3 +105,7 @@ La interfaz anterior (`cv-residue-diff/scripts/label_app.py`) sigue funcionando 
 ## GPU en otro equipo
 
 Los trabajos pesados pueden ejecutarse en un worker remoto: ver [docs/WORKERS.md](docs/WORKERS.md).
+
+## Flujos de detección
+
+Modelos, detectores y procedimientos del espacio de trabajo combinados con O / Y para el asistido, la ejecución y la evaluación: ver [docs/FLUJOS.md](docs/FLUJOS.md).

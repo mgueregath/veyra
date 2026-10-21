@@ -5,10 +5,12 @@ import datetime as dt
 from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
-from . import consensus
+from . import consensus, flows
+from .config import settings
 from .db import SessionLocal
+from .evaluation import Pred
 from .inference import model_predictions
-from .models import Annotation, Frame, Project, Proposal, Review, Run
+from .models import Annotation, DetectionFlow, Frame, Project, Proposal, Review, Run
 
 BATCH = 48
 
@@ -23,6 +25,17 @@ def frames_in_scope(db: Session, project: Project, scope: str, frame_ids: list[i
             ~exists().where(Review.frame_id == Frame.id),
         )
     return list(db.scalars(q))
+
+
+def flow_predictions(db: Session, project: Project, spec: dict, frame_ids: list[int]) -> dict[int, list[Pred]]:
+    """Detecciones de un flujo sobre imágenes del proyecto, por id de imagen."""
+    from pathlib import Path
+
+    media = Path(settings.media_root).resolve()
+    frames = db.scalars(select(Frame).where(Frame.id.in_(frame_ids))).all()
+    items = [flows.Item(str(media / f.image_path), f.id) for f in frames]
+    preds, _ = flows.run(db, project, spec, items)
+    return {f.id: preds[str(media / f.image_path)] for f in frames}
 
 
 def execute_preannotation(run_id: int, cancelled: set[int]) -> None:
@@ -42,7 +55,11 @@ def execute_preannotation(run_id: int, cancelled: set[int]) -> None:
         project = db.get(Project, run.project_id)
         prm = dict(run.params)
         ids = frames_in_scope(db, project, prm["scope"], prm.get("frame_ids"))
-    total, boxes, tag, err = len(ids), 0, f"model:{prm['model_id']}", None
+    flow_id = prm.get("flow_id")
+    total, boxes, tag, err = len(ids), 0, (f"flow:{flow_id}" if flow_id else f"model:{prm['model_id']}"), None
+    if flow_id:
+        with SessionLocal() as db:
+            flow_spec = db.get(DetectionFlow, flow_id).spec
     try:
         for i in range(0, total, BATCH):
             if run_id in cancelled:
@@ -50,11 +67,15 @@ def execute_preannotation(run_id: int, cancelled: set[int]) -> None:
             batch = ids[i : i + BATCH]
             with SessionLocal() as db:
                 project = db.get(Project, prm["project_id"])
-                preds = model_predictions(db, project, prm["model_id"], batch)
+                preds = (
+                    flow_predictions(db, project, flow_spec, batch)
+                    if flow_id
+                    else model_predictions(db, project, prm["model_id"], batch)
+                )
                 db.execute(delete(Proposal).where(Proposal.frame_id.in_(batch), Proposal.sources.contains([tag])))
                 for fid, plist in preds.items():
                     for p in plist:
-                        if p.score >= prm["min_score"]:
+                        if flow_id or p.score >= prm["min_score"]:  # en un flujo, el mínimo lo pone cada fuente
                             x, y, w, h = p.bbox
                             db.add(
                                 Proposal(
@@ -63,7 +84,7 @@ def execute_preannotation(run_id: int, cancelled: set[int]) -> None:
                                     y=y,
                                     w=max(1, w),
                                     h=max(1, h),
-                                    sources=["model", tag],
+                                    sources=["flow" if flow_id else "model", tag],
                                     score=round(p.score, 4),
                                 )
                             )
@@ -86,7 +107,8 @@ def execute_preannotation(run_id: int, cancelled: set[int]) -> None:
                 "progress": {"done": total, "total": total},
                 "frames": total,
                 "boxes": boxes,
-                "model_id": prm["model_id"],
+                "model_id": prm.get("model_id"),
+                "flow_id": flow_id,
                 "min_score": prm["min_score"],
             }
         db.commit()

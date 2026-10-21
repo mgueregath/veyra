@@ -1,22 +1,24 @@
-"""Detección con un modelo sobre una imagen o un conjunto de imágenes (del proyecto o subidas)."""
+"""Detección con un modelo o un flujo sobre una imagen o un conjunto de imágenes (del proyecto o subidas)."""
 
 import json
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import inference, usage
+from .. import flows, inference, usage
 from ..config import settings
 from ..db import get_db
 from ..deps import current_user, role_in
 from ..models import AuditLog, Frame, Model, Project, User
+from .flows import get_flow
 
 router = APIRouter(prefix="/api", tags=["detect"])
 OPERATE = {"admin", "reviewer"}
@@ -26,29 +28,71 @@ MIN_SCORE = 0.05  # por debajo no se devuelve nada: el navegador filtra con su p
 
 
 class DetectIn(BaseModel):
-    model_id: int
+    model_id: int | None = None  # un modelo… o un flujo guardado (exactamente uno de los dos)
+    flow_id: int | None = None
     first: int = Field(ge=1)  # número de imagen del proyecto (el que se ve en el editor)
     last: int | None = Field(None, ge=1)
+
+    @model_validator(mode="after")
+    def one_detector(self):
+        if (self.model_id is None) == (self.flow_id is None):
+            raise ValueError("indique un modelo (model_id) o un flujo (flow_id), no ambos")
+        return self
 
 
 def _root() -> Path:
     return Path(settings.runs_root) / "detect"
 
 
-def _check(db: Session, user: User, pid: int, model_id: int) -> tuple[Project, Model]:
+@dataclass
+class Target:
+    """Qué corre la detección: un modelo entrenado o un flujo guardado."""
+
+    kind: str  # model | flow
+    id: int
+    name: str
+    classes: list[str]
+    model: Model | None = None
+    spec: dict | None = None
+
+
+def _project(db: Session, user: User, pid: int) -> Project:
     p = db.get(Project, pid)
     role = role_in(db, user, pid) if p else None
     if not p or not role:
         raise HTTPException(404, "Proyecto no encontrado")
     if role not in OPERATE:
         raise HTTPException(403, "Tu rol no permite correr modelos")
-    m = db.get(Model, model_id)
+    return p
+
+
+def _target(db: Session, p: Project, model_id: int | None, flow_id: int | None) -> Target:
+    if flow_id is not None:
+        f = get_flow(db, p, flow_id)
+        try:
+            flows.validate(db, p, f.spec)
+            classes = flows.classes_of(db, p, f.spec)
+        except flows.FlowError as e:
+            raise HTTPException(422, str(e)) from None
+        return Target("flow", f.id, f.name, classes, spec=f.spec)
+    m = db.get(Model, model_id or 0)
     if not m or m.project_id != p.id:
         raise HTTPException(404, "Modelo no encontrado")
-    return p, m
+    return Target("model", m.id, m.name, m.classes, model=m)
 
 
-def _items(m: Model, batch: str, rows: list[dict], preds: dict[str, list]) -> dict:
+def _predict(db: Session, p: Project, t: Target, rows: list[dict]) -> dict[str, list]:
+    if t.model is not None:
+        return inference.predict_paths(t.model, [r["path"] for r in rows])
+    items = [flows.Item(r["path"], r.get("frame_id")) for r in rows]
+    try:
+        preds, _ = flows.run(db, p, t.spec, items)
+    except flows.FlowError as e:
+        raise RuntimeError(str(e)) from None
+    return preds
+
+
+def _items(t: Target, batch: str, rows: list[dict], preds: dict[str, list]) -> dict:
     out = []
     for i, r in enumerate(rows):
         dets = [
@@ -70,7 +114,14 @@ def _items(m: Model, batch: str, rows: list[dict], preds: dict[str, list]) -> di
                 "dets": dets,
             }
         )
-    return {"id": batch, "model_id": m.id, "model": m.name, "classes": m.classes, "items": out}
+    return {
+        "id": batch,
+        "model_id": t.id if t.kind == "model" else None,
+        "flow_id": t.id if t.kind == "flow" else None,
+        "model": t.name,
+        "classes": t.classes,
+        "items": out,
+    }
 
 
 def _save(batch: str, project_id: int, user: User, result: dict) -> None:
@@ -84,7 +135,8 @@ def detect_project_images(
     project_id: int, body: DetectIn, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     """Corre el modelo sobre una imagen del proyecto (first = last) o sobre un rango de ellas."""
-    p, m = _check(db, user, project_id, body.model_id)
+    p = _project(db, user, project_id)
+    target = _target(db, p, body.model_id, body.flow_id)
     last = body.last if body.last is not None else body.first
     if last < body.first:
         raise HTTPException(422, "El final del rango no puede ser menor que el inicio")
@@ -110,19 +162,23 @@ def detect_project_images(
         }
         for i, f in enumerate(frames)
     ]
-    return _run(db, user, p, m, rows)
+    return _run(db, user, p, target, rows)
 
 
 @router.post("/projects/{project_id}/detect/upload")
 async def detect_uploaded_images(
     project_id: int,
-    model_id: int = Form(...),
+    model_id: int | None = Form(None),
+    flow_id: int | None = Form(None),
     files: list[UploadFile] = File(...),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
     """Corre el modelo sobre imágenes subidas desde el equipo de la persona (no pasan a formar parte del proyecto)."""
-    p, m = _check(db, user, project_id, model_id)
+    if (model_id is None) == (flow_id is None):
+        raise HTTPException(422, "Indique un modelo (model_id) o un flujo (flow_id), no ambos")
+    p = _project(db, user, project_id)
+    target = _target(db, p, model_id, flow_id)
     if not files or len(files) > MAX_IMAGES:
         raise HTTPException(422, f"Suba entre 1 y {MAX_IMAGES} imágenes")
     try:
@@ -150,23 +206,23 @@ async def detect_uploaded_images(
                 "height": img.shape[0],
             }
         )
-    return _run(db, user, p, m, rows, batch)
+    return _run(db, user, p, target, rows, batch)
 
 
-def _run(db: Session, user: User, p: Project, m: Model, rows: list[dict], batch: str | None = None) -> dict:
+def _run(db: Session, user: User, p: Project, t: Target, rows: list[dict], batch: str | None = None) -> dict:
     batch = batch or secrets.token_hex(8)
     try:
-        preds = inference.predict_paths(m, [r["path"] for r in rows])
+        preds = _predict(db, p, t, rows)
     except RuntimeError as e:
         raise HTTPException(502, str(e)) from None
-    result = _items(m, batch, rows, preds)
+    result = _items(t, batch, rows, preds)
     _save(batch, p.id, user, result)
     db.add(
         AuditLog(
             user_id=user.id,
             project_id=p.id,
             action="detect.run",
-            target=f"model:{m.id}",
+            target=f"{t.kind}:{t.id}",
             detail={"images": len(rows), "batch": batch},
         )
     )

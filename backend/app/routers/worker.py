@@ -15,7 +15,7 @@ from ..deps import current_user
 from ..models import AuditLog, GpuWorker, User, WorkerJob
 
 router = APIRouter(prefix="/api", tags=["workers"])
-KINDS = {"train", "predict", "live", "workspace"}
+KINDS = {"train", "predict", "live", "workspace", "procedure"}
 LOG_CAP = 60_000
 LOST_GRACE = 15  # segundos: un trabajo recién reclamado puede no aparecer todavía en los latidos del worker
 

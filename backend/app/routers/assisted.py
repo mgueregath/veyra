@@ -1,22 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import assisted, training
+from .. import assisted, flows, training
 from ..db import get_db
 from ..deps import current_user, role_in
 from ..models import AuditLog, Frame, Model, Project, Run, User
+from .flows import get_flow
 
 router = APIRouter(prefix="/api", tags=["assisted"])
 ROLES = {"admin", "reviewer"}
 
 
 class PreIn(BaseModel):
-    model_id: int
+    model_id: int | None = None  # un modelo… o un flujo guardado (exactamente uno de los dos)
+    flow_id: int | None = None
     scope: str = Field("unreviewed", pattern="^(unreviewed|all|frame_ids)$")
     frame_ids: list[int] | None = None
-    min_score: float = Field(0.15, ge=0, le=1)
+    min_score: float = Field(0.15, ge=0, le=1)  # solo para un modelo; en un flujo cada fuente trae su mínimo
+
+    @model_validator(mode="after")
+    def one_detector(self):
+        if (self.model_id is None) == (self.flow_id is None):
+            raise ValueError("indique un modelo (model_id) o un flujo (flow_id), no ambos")
+        return self
 
 
 def _project(db, user, pid):
@@ -33,9 +41,19 @@ def _project(db, user, pid):
 def preannotate(project_id: int, body: PreIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Lanza (en segundo plano, en la cola de la GPU) la preanotación de las imágenes con un modelo."""
     p = _project(db, user, project_id)
-    m = db.get(Model, body.model_id)
-    if not m or m.project_id != p.id:
-        raise HTTPException(404, "Modelo no encontrado")
+    label = ""
+    if body.flow_id is not None:
+        f = get_flow(db, p, body.flow_id)
+        try:
+            flows.validate(db, p, f.spec)
+        except flows.FlowError as e:
+            raise HTTPException(422, str(e)) from None
+        label = f"flujo {f.name}"
+    else:
+        m = db.get(Model, body.model_id)
+        if not m or m.project_id != p.id:
+            raise HTTPException(404, "Modelo no encontrado")
+        label = m.name
     if body.scope == "frame_ids":
         valid = set(
             db.scalars(
@@ -52,7 +70,7 @@ def preannotate(project_id: int, body: PreIn, user: User = Depends(current_user)
     run = Run(
         project_id=p.id,
         kind="preannotation",
-        name=f"preanotar con {m.name} ({body.scope})",
+        name=f"preanotar con {label} ({body.scope})",
         params={**body.model_dump(), "project_id": p.id},
         status="queued",
         created_by=user.id,
@@ -63,7 +81,7 @@ def preannotate(project_id: int, body: PreIn, user: User = Depends(current_user)
             user_id=user.id,
             project_id=p.id,
             action="preannotation.start",
-            detail={"model_id": m.id, "scope": body.scope},
+            detail={"model_id": body.model_id, "flow_id": body.flow_id, "scope": body.scope},
         )
     )
     db.commit()

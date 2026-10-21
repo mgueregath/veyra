@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .. import detectors
 from ..db import get_db
 from ..deps import current_user, role_in
-from ..evaluation import evaluate
+from ..evaluation import Pred, evaluate
 from ..models import AuditLog, DatasetVersion, Frame, Project, Run, User, Video
 from ..workflow import class_sets
 
@@ -48,6 +48,16 @@ def run_evaluation(
         kind, name = detectors.parse_spec(spec)
         if kind == "baseline":
             preds = detectors.baseline_predictions(db, project, ids, name)
+        elif kind == "flow":
+            from ..assisted import flow_predictions
+            from ..models import DetectionFlow
+
+            f = db.get(DetectionFlow, int(name))
+            if not f or f.project_id != project.id:
+                raise ValueError(f"el flujo {name} no existe en este proyecto")
+            raw = flow_predictions(db, project, f.spec, ids)
+            # las fuentes sin clase (apariencia, movimiento, procedimientos) se evalúan como la primera clase positiva
+            preds = {fid: [Pred(p.bbox, p.label or positive[0], p.score) for p in ps] for fid, ps in raw.items()}
         else:
             from ..inference import model_predictions
 

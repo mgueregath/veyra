@@ -274,3 +274,18 @@ progress::-webkit-progress-bar{background:#ded5dc;border-radius:7px}progress::-w
 .steps pre{background:#2b2029;color:#f0e6ec;border-radius:8px;padding:12px 14px;margin:8px 0;font-size:13px;overflow:auto}
 .steps code,.card p code,.modalbox code{background:#f0e6ec;border-radius:4px;padding:1px 6px;font-size:12.5px}
 .btn-outline.sm{min-height:28px;padding:3px 10px;font-size:12.5px}
+
+/* ---- flujos de detección (O / Y) ---- */
+.flowsbox{width:min(760px,95vw);max-height:90vh;overflow:auto}
+.fgroup{border:1px solid #d7e0ee;border-left:4px solid var(--blue);border-radius:9px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:#fff;margin:2px 0}
+.fgroup.and{border-left-color:#237653;background:#f6faf8}.fgroup.or{border-left-color:var(--primary)}
+.fgroup .fgroup{margin-left:10px}
+.fhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.fleaf{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fleaf select{min-width:220px;flex:1}
+.fmin{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-weight:500}
+.fmin input{width:70px;min-height:34px}
+.f-ref{width:150px}.f-params{width:170px}.f-params.bad{border-color:#b83d52}
+.fadd{display:flex;gap:8px}
+.flowtext{margin:2px 0;background:var(--soft);border-radius:8px;padding:8px 12px;font-size:14px}
+.detsel{display:inline-flex;gap:8px;align-items:center;width:100%}.detsel select{flex:1;min-width:0}
