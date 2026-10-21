@@ -1,3 +1,4 @@
+import datetime as dt
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,9 +9,30 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import settings
 from ..db import get_db
 from ..deps import WRITE_ROLES, current_user, role_in
-from ..models import Annotation, AnnotationBox, Assignment, AuditLog, Frame, Project, Review, User
-from ..schemas import AnnotationIn, AnnotationOut, BoxOut, FrameItem, FrameOut, LastEdit, ProposalOut, ReviewOut
-from ..workflow import FrameState, active_lock_holder, compute_states, latest_annotations, project_mode
+from ..models import (
+    Annotation,
+    AnnotationBox,
+    Assignment,
+    AuditLog,
+    DatasetItem,
+    DatasetVersion,
+    Frame,
+    Project,
+    Review,
+    User,
+)
+from ..schemas import (
+    AnnotationIn,
+    AnnotationOut,
+    BoxOut,
+    DeletedInfo,
+    FrameItem,
+    FrameOut,
+    LastEdit,
+    ProposalOut,
+    ReviewOut,
+)
+from ..workflow import FrameState, active_lock_holder, compute_states, latest_annotations, project_mode, release_lock
 
 router = APIRouter(prefix="/api", tags=["frames"])
 
@@ -76,7 +98,10 @@ def _list_frames(project: Project, offset, limit, flt, user, db):
         select(Frame, Annotation)
         .outerjoin(Annotation, (Annotation.frame_id == Frame.id) & (Annotation.user_id == user.id))
         .options(selectinload(Frame.video), selectinload(Annotation.boxes))
-        .where(Frame.project_id == project.id)
+        .where(
+            Frame.project_id == project.id,
+            Frame.deleted_at.is_not(None) if flt == "trash" else Frame.deleted_at.is_(None),
+        )
         .order_by(Frame.position, Frame.id)
     )
     if flt == "mine_pending":
@@ -145,7 +170,19 @@ def get_frame(frame_id: int, user: User = Depends(current_user), db: Session = D
             current = newest
             editor = db.get(User, newest.user_id)
             last_edit = LastEdit(user=editor.display_name or editor.username, at=newest.updated_at.isoformat())
+    gone = None
+    if f.deleted_at is not None:
+        who = db.get(User, f.deleted_by) if f.deleted_by else None
+        gone = DeletedInfo(by=(who.display_name or who.username) if who else None, at=f.deleted_at.isoformat())
+    in_ds = db.scalars(
+        select(DatasetVersion.name)
+        .join(DatasetItem, DatasetItem.version_id == DatasetVersion.id)
+        .where(DatasetItem.frame_id == f.id)
+        .order_by(DatasetVersion.id)
+    ).all()
     return FrameOut(
+        deleted=gone,
+        in_datasets=list(in_ds),
         id=f.id,
         position=f.position,
         video=f.video.name,
@@ -179,6 +216,8 @@ def save_annotation(
 ):
     """Guarda el trabajo de ESTE usuario sobre el frame (reemplaza su conjunto de cajas)."""
     f = _frame_for(db, frame_id, user, write=True)
+    if f.deleted_at is not None:
+        raise HTTPException(409, "Esta captura está en la papelera: restáurala para editarla")
     config = db.get(Project, f.project_id).config or {}
     valid = {c["id"] for c in config.get("classes", [])}
     for b in body.boxes:
@@ -241,7 +280,8 @@ def list_frames(
     limit: int = Query(100, ge=1, le=500),
     only_pending: bool = False,
     filter: str = Query(
-        "all", pattern="^(all|mine_pending|assigned_pending|pending|single|agreed|disagreement|final|needs_review)$"
+        "all",
+        pattern="^(all|mine_pending|assigned_pending|pending|single|agreed|disagreement|final|needs_review|trash)$",
     ),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -249,4 +289,57 @@ def list_frames(
     project = db.get(Project, project_id)
     if not project or not role_in(db, user, project_id):
         raise HTTPException(404, "Proyecto no encontrado")
+    if filter == "trash" and role_in(db, user, project_id) not in ("admin", "reviewer"):
+        raise HTTPException(403, "Solo administración y revisión ven la papelera")
     return _list_frames(project, offset, limit, "mine_pending" if only_pending else filter, user, db)
+
+
+TRASH_ROLES = {"admin", "reviewer"}
+
+
+def _trash_frame(db: Session, user: User, frame_id: int) -> Frame:
+    f = db.get(Frame, frame_id)
+    role = role_in(db, user, f.project_id) if f else None
+    if not f or not role:
+        raise HTTPException(404, "Imagen no encontrada")
+    if role not in TRASH_ROLES:
+        raise HTTPException(403, "Solo administración y revisión pueden eliminar o restaurar capturas")
+    return f
+
+
+@router.delete("/frames/{frame_id}")
+def delete_frame(frame_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Manda la captura a la papelera: deja de aparecer en colas, estadísticas y datasets NUEVOS. Se puede restaurar.
+
+    Las versiones de dataset ya creadas son inmutables y la conservan; la imagen y sus etiquetas no se borran del disco.
+    """
+    f = _trash_frame(db, user, frame_id)
+    if f.deleted_at is None:
+        f.deleted_at, f.deleted_by = dt.datetime.now(dt.timezone.utc), user.id
+        in_ds = db.scalars(
+            select(DatasetVersion.name)
+            .join(DatasetItem, DatasetItem.version_id == DatasetVersion.id)
+            .where(DatasetItem.frame_id == f.id)
+        ).all()
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                project_id=f.project_id,
+                action="frame.delete",
+                target=f"frame:{f.id}",
+                detail={"position": f.position, "in_datasets": list(in_ds)},
+            )
+        )
+        db.commit()
+        release_lock(db, f.id, user.id)
+    return {"ok": True, "id": f.id}
+
+
+@router.post("/frames/{frame_id}/restore")
+def restore_frame(frame_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    f = _trash_frame(db, user, frame_id)
+    if f.deleted_at is not None:
+        f.deleted_at = f.deleted_by = None
+        db.add(AuditLog(user_id=user.id, project_id=f.project_id, action="frame.restore", target=f"frame:{f.id}"))
+        db.commit()
+    return {"ok": True, "id": f.id}

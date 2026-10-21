@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api", tags=["projects"])
 
 
 def _out(db: Session, user: User, p: Project) -> ProjectOut:
-    n = db.scalar(select(func.count()).select_from(Frame).where(Frame.project_id == p.id))
+    n = db.scalar(select(func.count()).select_from(Frame).where(Frame.project_id == p.id, Frame.deleted_at.is_(None)))
     if project_mode(p) == "collab":  # colaborativa: el avance es del proyecto, no de cada persona
         r = len(compute_states(db, p))
     else:
@@ -35,9 +35,13 @@ def _out(db: Session, user: User, p: Project) -> ProjectOut:
             select(func.count())
             .select_from(Annotation)
             .join(Frame, Frame.id == Annotation.frame_id)
-            .where(Frame.project_id == p.id, Annotation.user_id == user.id, Annotation.reviewed)
+            .where(
+                Frame.project_id == p.id, Frame.deleted_at.is_(None), Annotation.user_id == user.id, Annotation.reviewed
+            )
         )
-    cover = db.scalar(select(Frame.id).where(Frame.project_id == p.id).order_by(Frame.id).limit(1))
+    cover = db.scalar(
+        select(Frame.id).where(Frame.project_id == p.id, Frame.deleted_at.is_(None)).order_by(Frame.id).limit(1)
+    )
     return ProjectOut(
         id=p.id,
         slug=p.slug,
@@ -180,12 +184,14 @@ def project_stats(project_id: int, user: User = Depends(current_user), db: Sessi
     """Resumen de TODO el proyecto para el usuario actual: por clase, a mano, sin etiquetar y borrados."""
     if not role_in(db, user, project_id):
         raise HTTPException(404, "Proyecto no encontrado")
-    n = db.scalar(select(func.count()).select_from(Frame).where(Frame.project_id == project_id))
+    n = db.scalar(
+        select(func.count()).select_from(Frame).where(Frame.project_id == project_id, Frame.deleted_at.is_(None))
+    )
     base = (
         select(AnnotationBox)
         .join(Annotation, Annotation.id == AnnotationBox.annotation_id)
         .join(Frame, Frame.id == Annotation.frame_id)
-        .where(Frame.project_id == project_id, Annotation.user_id == user.id)
+        .where(Frame.project_id == project_id, Frame.deleted_at.is_(None), Annotation.user_id == user.id)
     )
     by_label: dict[str, int] = {}
     unlabeled = manual = deleted = 0
@@ -207,21 +213,26 @@ def project_stats(project_id: int, user: User = Depends(current_user), db: Sessi
             select(func.count())
             .select_from(Annotation)
             .join(Frame, Frame.id == Annotation.frame_id)
-            .where(Frame.project_id == project_id, Annotation.user_id == user.id, Annotation.reviewed)
+            .where(
+                Frame.project_id == project_id,
+                Frame.deleted_at.is_(None),
+                Annotation.user_id == user.id,
+                Annotation.reviewed,
+            )
         )
     )
     assigned = db.scalar(
         select(func.count())
         .select_from(Assignment)
         .join(Frame, Frame.id == Assignment.frame_id)
-        .where(Frame.project_id == project_id, Assignment.user_id == user.id)
+        .where(Frame.project_id == project_id, Frame.deleted_at.is_(None), Assignment.user_id == user.id)
     )
     if done is not None:
         mine = set(
             db.scalars(
                 select(Assignment.frame_id)
                 .join(Frame, Frame.id == Assignment.frame_id)
-                .where(Frame.project_id == project_id, Assignment.user_id == user.id)
+                .where(Frame.project_id == project_id, Frame.deleted_at.is_(None), Assignment.user_id == user.id)
             )
         )
         assigned_done = len(mine & done)
@@ -231,7 +242,12 @@ def project_stats(project_id: int, user: User = Depends(current_user), db: Sessi
             .select_from(Assignment)
             .join(Frame, Frame.id == Assignment.frame_id)
             .join(Annotation, (Annotation.frame_id == Assignment.frame_id) & (Annotation.user_id == Assignment.user_id))
-            .where(Frame.project_id == project_id, Assignment.user_id == user.id, Annotation.reviewed)
+            .where(
+                Frame.project_id == project_id,
+                Frame.deleted_at.is_(None),
+                Assignment.user_id == user.id,
+                Annotation.reviewed,
+            )
         )
     return {
         "frames": n,

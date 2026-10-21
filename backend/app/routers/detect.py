@@ -92,8 +92,10 @@ def detect_project_images(
         raise HTTPException(422, f"Como máximo {MAX_IMAGES} imágenes por vez")
     frames = db.scalars(
         select(Frame)
-        .where(Frame.project_id == p.id, Frame.position >= body.first - 1, Frame.position <= last - 1)
-        .order_by(Frame.position)
+        .where(Frame.project_id == p.id, Frame.deleted_at.is_(None))
+        .order_by(Frame.position, Frame.id)
+        .offset(body.first - 1)
+        .limit(last - body.first + 1)
     ).all()
     if not frames:
         raise HTTPException(404, "No hay imágenes con esos números en el proyecto")
@@ -101,12 +103,12 @@ def detect_project_images(
     rows = [
         {
             "path": str(media / f.image_path),
-            "name": f"Imagen {f.position + 1}",
+            "name": f"Imagen {body.first + i}",
             "frame_id": f.id,
             "width": f.width,
             "height": f.height,
         }
-        for f in frames
+        for i, f in enumerate(frames)
     ]
     return _run(db, user, p, m, rows)
 

@@ -14,7 +14,7 @@ BATCH = 48
 
 
 def frames_in_scope(db: Session, project: Project, scope: str, frame_ids: list[int] | None) -> list[int]:
-    q = select(Frame.id).where(Frame.project_id == project.id).order_by(Frame.position)
+    q = select(Frame.id).where(Frame.project_id == project.id, Frame.deleted_at.is_(None)).order_by(Frame.position)
     if scope == "frame_ids":
         q = q.where(Frame.id.in_(frame_ids or []))
     elif scope == "unreviewed":  # nadie la revisó todavía: es donde la ayuda sirve

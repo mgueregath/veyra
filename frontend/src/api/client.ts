@@ -9,9 +9,9 @@ export interface Proposal { id: number; bbox: [number, number, number, number]; 
 export interface AnnBox { id?: number | null; proposal_id?: number | null; bbox: [number, number, number, number]; label: string | null; manual: boolean; orig_bbox?: number[] | null; sources: string[]; score: number | null; deleted: boolean }
 export interface Annotation { reviewed: boolean; boxes: AnnBox[] }
 export interface ReviewInfo { reviewer: string; final_user: string; final_user_id: number; note: string | null }
-export interface FrameDetail { id: number; position: number; video: string; video_id: number; has_video: boolean; frame_index: number; t: number | null; width: number; height: number; stratum: string | null; proposals: Proposal[]; annotation: Annotation | null; n_annotators: number; last_edit?: { user: string; at: string } | null; status: Status; n_reviewed: number; locked_by: string | null; assigned_to_me: boolean; review: ReviewInfo | null }
+export interface FrameDetail { id: number; position: number; video: string; video_id: number; has_video: boolean; frame_index: number; t: number | null; width: number; height: number; stratum: string | null; proposals: Proposal[]; annotation: Annotation | null; n_annotators: number; last_edit?: { user: string; at: string } | null; deleted?: { by: string | null; at: string } | null; in_datasets?: string[]; status: Status; n_reviewed: number; locked_by: string | null; assigned_to_me: boolean; review: ReviewInfo | null }
 export type Status = "pending" | "single" | "agreed" | "disagreement" | "final";
-export type FrameFilter = "all" | "mine_pending" | "assigned_pending" | "pending" | "single" | "agreed" | "disagreement" | "final" | "needs_review";
+export type FrameFilter = "all" | "mine_pending" | "assigned_pending" | "pending" | "single" | "agreed" | "disagreement" | "final" | "needs_review" | "trash";
 export interface FrameItem { id: number; position: number; video: string; frame_index: number; t: number | null; stratum: string | null; reviewed: boolean; origin: string | null; status: Status; assigned: boolean; n_labeled: Record<string, number> }
 export interface UserAnnotation { user_id: number; user: string; display_name?: string | null; reviewed: boolean; boxes: AnnBox[] }
 export interface Member { username: string; display_name: string | null; role: string }
@@ -54,7 +54,7 @@ export interface Usage { images: { files: number; bytes: number }; videos: { fil
 export interface SystemInfo { jobs: { queued: number; running: number }; live_active: number; recent: { at: string; user: string | null; action: string; target: string | null }[] }
 export interface VideoInfo { id: number; name: string; fps: number; dur: number }
 export interface ProjectStats { frames: number; reviewed: number; assigned: number; assigned_done: number; by_label: Record<string, number>; manual: number; unlabeled: number; deleted: number }
-export interface SnapshotResult { existing: boolean; id: number; position: number }
+export interface SnapshotResult { existing: boolean; restored?: boolean; id: number; position: number }
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -79,6 +79,8 @@ export const api = {
   updateProject: (pid: number, body: ProjectPatch) => req<Project>(`/api/projects/${pid}`, { method: "PATCH", body: JSON.stringify(body) }),
   frames: (pid: number, offset = 0, limit = 500, filter: FrameFilter = "all") => req<FrameItem[]>(`/api/projects/${pid}/frames?offset=${offset}&limit=${limit}&filter=${filter}`),
   /** Carga el listado completo por páginas (la API limita cada petición a 500). */
+  deleteFrame: (id: number) => req<{ ok: boolean; id: number }>(`/api/frames/${id}`, { method: "DELETE" }),
+  restoreFrame: (id: number) => req<{ ok: boolean; id: number }>(`/api/frames/${id}/restore`, { method: "POST" }),
   allFrames: async (pid: number, filter: FrameFilter = "all") => {
     const out: FrameItem[] = [];
     for (let off = 0; ; off += 500) {

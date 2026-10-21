@@ -65,14 +65,15 @@ def queue_next(
     has_review = exists().where(Review.frame_id == Frame.id)
     mine = exists().where(and_(Assignment.frame_id == Frame.id, Assignment.user_id == user.id))
     others = exists().where(and_(Assignment.frame_id == Frame.id, Assignment.user_id != user.id))
-    q = select(Frame.id, Frame.position).where(Frame.project_id == project_id, ~mine_done, ~has_review)
+    alive = Frame.deleted_at.is_(None)
+    q = select(Frame.id, Frame.position).where(Frame.project_id == project_id, alive, ~mine_done, ~has_review)
     if scope == "assigned":
         q = q.where(mine)
     else:  # las propias primero y luego las que no son de nadie más
         q = q.where(mine | ~others)
     q = q.order_by(~mine, Frame.position).limit(40)
     if collab:  # en colaborativa «hecha» es que la versión vigente esté revisada, no que lo haya hecho esta persona
-        q = select(Frame.id, Frame.position).where(Frame.project_id == project_id)
+        q = select(Frame.id, Frame.position).where(Frame.project_id == project_id, alive)
         q = q.where(mine) if scope == "assigned" else q.where(mine | ~others)
         q = q.order_by(~mine, Frame.position).limit(400)
         cand = db.execute(q).all()
@@ -115,7 +116,13 @@ def assign(project_id: int, body: AssignIn, user: User = Depends(current_user), 
             raise HTTPException(422, f"El usuario {name} no pertenece al proyecto")
         users.append(u)
     if body.frame_ids is not None:
-        valid = set(db.scalars(select(Frame.id).where(Frame.project_id == p.id, Frame.id.in_(body.frame_ids))))
+        valid = set(
+            db.scalars(
+                select(Frame.id).where(
+                    Frame.project_id == p.id, Frame.deleted_at.is_(None), Frame.id.in_(body.frame_ids)
+                )
+            )
+        )
         pool = [i for i in body.frame_ids if i in valid]
     else:
         pool = list(
@@ -123,6 +130,7 @@ def assign(project_id: int, body: AssignIn, user: User = Depends(current_user), 
                 select(Frame.id)
                 .where(
                     Frame.project_id == p.id,
+                    Frame.deleted_at.is_(None),
                     ~exists().where(Assignment.frame_id == Frame.id),
                     ~exists().where(and_(Annotation.frame_id == Frame.id, Annotation.reviewed)),
                 )
@@ -169,7 +177,7 @@ def assignments_summary(project_id: int, user: User = Depends(current_user), db:
         select(User.username, func.count(Assignment.id), func.count(Assignment.id).filter(done))
         .join(Assignment, Assignment.user_id == User.id)
         .join(Frame, Frame.id == Assignment.frame_id)
-        .where(Frame.project_id == p.id)
+        .where(Frame.project_id == p.id, Frame.deleted_at.is_(None))
         .group_by(User.username)
         .order_by(User.username)
     ).all()
@@ -263,7 +271,9 @@ def quality(project_id: int, user: User = Depends(current_user), db: Session = D
     _, negative = class_sets(p)
     states = compute_states(db, p)
     status_counts = {s: 0 for s in ("pending", "single", "agreed", "disagreement", "final")}
-    total = db.scalar(select(func.count()).select_from(Frame).where(Frame.project_id == p.id))
+    total = db.scalar(
+        select(func.count()).select_from(Frame).where(Frame.project_id == p.id, Frame.deleted_at.is_(None))
+    )
     for st in states.values():
         status_counts[st.status] += 1
     status_counts["pending"] = total - sum(v for k, v in status_counts.items() if k != "pending")
@@ -271,7 +281,7 @@ def quality(project_id: int, user: User = Depends(current_user), db: Session = D
         select(Annotation)
         .options(selectinload(Annotation.boxes))
         .join(Frame, Frame.id == Annotation.frame_id)
-        .where(Frame.project_id == p.id, Annotation.reviewed)
+        .where(Frame.project_id == p.id, Frame.deleted_at.is_(None), Annotation.reviewed)
     ).all()
     names = (
         {u.id: u.username for u in db.scalars(select(User).where(User.id.in_({a.user_id for a in anns})))}

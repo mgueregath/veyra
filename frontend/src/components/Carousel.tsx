@@ -21,9 +21,9 @@ export const FILTERS_COLLAB: { id: FrameFilter; label: string }[] = [
 ];
 
 /** Tira inferior: filtro, ‹ miniaturas ›, e índice «N / total» (escribe un número y Enter para ir a esa imagen). */
-export default function Carousel({ frames, curId, filter, setFilter, go, onPrev, onNext, gotoVal, setGotoVal, onGoto, reviewed, total, collab }: {
+export default function Carousel({ frames, curId, filter, setFilter, go, onPrev, onNext, gotoVal, setGotoVal, onGoto, reviewed, total, collab, canTrash }: {
   frames: FrameItem[]; curId: number | null; filter: FrameFilter; setFilter: (v: FrameFilter) => void; go: (id: number) => void;
-  onPrev: () => void; onNext: () => void; gotoVal: string; setGotoVal: (v: string) => void; onGoto: () => void; reviewed: number; total: number; collab: boolean;
+  onPrev: () => void; onNext: () => void; gotoVal: string; setGotoVal: (v: string) => void; onGoto: () => void; reviewed: number; total: number; collab: boolean; canTrash: boolean;
 }) {
   const strip = useRef<HTMLDivElement>(null);
   const pos = Math.max(0, frames.findIndex((f) => f.id === curId));
@@ -33,7 +33,7 @@ export default function Carousel({ frames, curId, filter, setFilter, go, onPrev,
     <footer id="stripwrap" className="strip2">
       <div className="stripprog" id="pbar" title={`Avance: ${reviewed} de ${total} imágenes revisadas por ti`}><div id="bar" style={{ width: `${total ? (100 * reviewed) / total : 0}%` }} /></div>
       <select id="flt" className="fsel" title="Qué imágenes mostrar en la tira y al navegar: todas, las que te faltan, tu cola, las que necesitan revisión, con desacuerdo o finales" value={filter} onChange={(e) => { setFilter(e.target.value as FrameFilter); e.target.blur(); }}>
-        {(collab ? FILTERS_COLLAB : FILTERS).map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+        {[...(collab ? FILTERS_COLLAB : FILTERS), ...(canTrash ? [{ id: "trash" as FrameFilter, label: "Papelera" }] : [])].map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
       </select>
       <button id="prev" className="navbtn" title="Imagen anterior (A o ←). No marca la actual como revisada" aria-label="Anterior" onClick={onPrev} {...nb}><Icon name="left" size={17} /></button>
       <div id="strip" ref={strip}>

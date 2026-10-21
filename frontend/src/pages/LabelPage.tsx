@@ -36,6 +36,9 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   const [viewing, setViewing] = useState<{ name: string; text: string } | null>(null);
   const [legendOpen, setLegendOpen] = useState(() => LS.get("legend_open") === "1");
   const [gotoVal, setGotoVal] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [undo, setUndo] = useState<{ id: number; n: number } | null>(null);
+  const trashedRef = useRef(false);
   const tick = useTick();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -98,11 +101,11 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
         canvas: canvasRef.current!,
         classes: () => classes,
         sources: () => sources,
-        policy: () => ({ alpha: player.alpha(), active: player.boxesActive() }),
+        policy: () => ({ alpha: player.alpha(), active: player.boxesActive() && !trashedRef.current }),
         background: () => player.drawable(),
         onChange: () => {
           const id = curRef.current, ed = editorRef.current;
-          if (id === null || !ed?.doc || !canWrite) return;
+          if (id === null || !ed?.doc || !canWrite || trashedRef.current) return;
           docs.current.set(id, ed.doc);
           saver.queue(id, docToAnnotation(ed.doc));
           patchItem(id, ed.doc);
@@ -123,6 +126,13 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   useEffect(() => {
     if (curId === null && frames.length) setCurId((frames.find((f) => !f.reviewed) ?? frames[0]).id);
   }, [frames, curId]);
+
+  // al entrar en la papelera se muestra la primera eliminada; al salir de ella no se queda abierta una eliminada
+  useEffect(() => {
+    if (list.isLoading || !frames.length) return;
+    if (filter === "trash" && !frames.some((f) => f.id === curId)) setCurId(frames[0].id);
+    else if (filter !== "trash" && detail?.deleted && !frames.some((f) => f.id === curId)) setCurId(frames[0].id);
+  }, [filter, frames, curId, detail, list.isLoading]);
 
   // ---- cargar la imagen actual ----
   const loadTok = useRef(0);
@@ -163,7 +173,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
     const fs = framesRef.current, c = curIdx();
     for (let k = 1; k <= fs.length; k++) { const f = fs[(c + k) % fs.length]; if (!f.reviewed) { setCurId(f.id); return; } }
   }, []);
-  const markRev = useCallback(() => { if (!canWrite) return; editorRef.current?.markReviewed(); goIdx(curIdx() + 1); }, [goIdx, canWrite]);
+  const markRev = useCallback(() => { if (!canWrite || trashedRef.current) return; editorRef.current?.markReviewed(); goIdx(curIdx() + 1); }, [goIdx, canWrite]);
   const gotoNum = () => { const n = parseInt(gotoVal); if (!isNaN(n)) goIdx(Math.max(1, Math.min(frames.length, n)) - 1); };
   const setClass = (id: string) => { LS.set("activeClass", id); editorRef.current?.setActiveClass(id); };
 
@@ -231,6 +241,38 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   const st = stats.data;
   const reviewedN = st?.reviewed ?? 0;
   const collab = project.config.mode === "collab";
+  const canTrash = project.role === "admin" || project.role === "reviewer";
+  const trashed = !!detail?.deleted;
+  trashedRef.current = trashed;
+  const refreshLists = () => { for (const k of ["frames", "stats", "projects"]) void qc.invalidateQueries({ queryKey: [k] }); };
+  const neighbour = () => { const fs = framesRef.current, i = curIdx(); return (fs[i + 1] ?? fs[i - 1])?.id ?? null; };
+  const trashNow = async () => {
+    if (curId === null) return;
+    const id = curId, n = cur + 1, next = neighbour();
+    setConfirmDel(false);
+    try {
+      while (saver.busy) await new Promise((r) => setTimeout(r, 100)); // que no llegue un guardado a una captura ya eliminada
+      await api.deleteFrame(id);
+      qc.removeQueries({ queryKey: ["frame", id] });
+      docs.current.delete(id);
+      setCurId(next);
+      refreshLists();
+      setUndo({ id, n });
+      window.setTimeout(() => setUndo((u) => (u?.id === id ? null : u)), 12000);
+    } catch (e) { playerRef.current?.notice("No se pudo eliminar: " + (e as Error).message, true); }
+  };
+  const restoreNow = async (id: number, keepHere = false) => {
+    try {
+      const next = neighbour();
+      await api.restoreFrame(id);
+      qc.removeQueries({ queryKey: ["frame", id] });
+      setDetail((d) => (d && d.id === id ? { ...d, deleted: null } : d));
+      setUndo(null);
+      refreshLists();
+      if (keepHere) setCurId(id); else setCurId(next);
+      playerRef.current?.notice("Captura restaurada.", false, true);
+    } catch (e) { playerRef.current?.notice("No se pudo restaurar: " + (e as Error).message, true); }
+  };
   const canReview = (project.role === "admin" || project.role === "reviewer") && !collab; // en colaborativa no hay revisión: manda la última edición
   const activeTab = canReview ? tab : "video";
   const setTabP = (t: "video" | "review") => { setTab(t); LS.set("sidetab", t); };
@@ -241,7 +283,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
   return (
     <div className="lp2">
       <TopNav project={project} user={user} active="label" onProjects={onExit} onLabel={() => undefined} onModels={onModels} onAdmin={onAdmin} onHelp={() => setHelp(true)} onLogout={onLogout} />
-      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} collab={collab} onClass={setClass} />
+      <Toolbar index={cur} detail={detail} editor={ed} ui={eui} classes={classes} activeClass={ed?.activeClass} canWrite={canWrite} lockHolder={lockHolder} collab={collab} canTrash={canTrash} onTrash={() => setConfirmDel(true)} onClass={setClass} />
       <div id="main">
         <div id="stage">
           <canvas id="cv" ref={canvasRef} />
@@ -251,6 +293,15 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
           {item && detail ? <>Frame {detail.frame_index}{detail.t != null && <> · {fmtT(detail.t)}</>}<span className="ovid"> · {detail.video.slice(4)}</span></> : "—"}
         </div>
         {viewing && <div id="viewchip" className="ochip tl" title="Cajas de otra persona superpuestas sobre la imagen para compararlas"><i className="dot" style={{ background: "#16a34a" }} /> {viewing.name} · {viewing.text}</div>}
+        {trashed && detail?.deleted && (
+          <div id="trashbar" className="trashbar" role="status">
+            <Icon name="trash" size={16} />
+            <span>Esta captura está en la papelera{detail.deleted.by ? ` (la eliminó ${detail.deleted.by})` : ""}: no cuenta en colas, estadísticas ni datasets nuevos.</span>
+            {canTrash && <button id="restoreframe" className="btn sm" onClick={() => void restoreNow(detail.id)} onMouseDown={(e) => e.preventDefault()}>Restaurar</button>}
+          </div>
+        )}
+        {filter === "trash" && !frames.length && !list.isLoading && <div id="trash-empty" className="trashbar empty">La papelera está vacía.</div>}
+        {undo && <div id="undotoast" className="undotoast" role="status">Captura {undo.n} eliminada<button id="undo-del" className="btn sm" onClick={() => void restoreNow(undo.id, true)} onMouseDown={(e) => e.preventDefault()}>Deshacer</button></div>}
         <div id="vmsg" className={"msg" + (pui?.msg?.ok ? " ok" : "")} hidden={!pui?.msg}>{pui?.msg?.text}</div>
       </div>
       <aside id="side">
@@ -303,7 +354,21 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
         </div>
       </aside>
       <Carousel frames={frames} curId={curId} filter={filter} setFilter={setFilter} go={setCurId} onPrev={() => goIdx(cur - 1)} onNext={() => goIdx(cur + 1)}
-        gotoVal={gotoVal} setGotoVal={setGotoVal} onGoto={gotoNum} reviewed={reviewedN} total={st?.frames ?? frames.length} collab={collab} />
+        gotoVal={gotoVal} setGotoVal={setGotoVal} onGoto={gotoNum} reviewed={reviewedN} total={st?.frames ?? frames.length} collab={collab} canTrash={canTrash} />
+      {confirmDel && detail && (
+        <div id="delmodal" className="modalback" onClick={(e) => { if (e.target === e.currentTarget) setConfirmDel(false); }}>
+          <div className="modalbox wide" role="dialog" aria-label="Eliminar captura">
+            <div className="hhead"><b>Eliminar la captura {cur + 1}</b><button type="button" id="del-x" title="Cerrar sin eliminar (Esc)" onClick={() => setConfirmDel(false)}>×</button></div>
+            <p>Úsalo para capturas que no aportan nada (movidas, repetidas, sin contenido). Irá a la <b>papelera</b>: dejará de aparecer en las colas, las estadísticas y los datasets que crees desde ahora, y podrás restaurarla cuando quieras.</p>
+            <ul className="delnote">
+              {(detail.annotation?.boxes.filter((b) => !b.deleted && b.label).length ?? 0) > 0 && <li>Tiene {detail.annotation?.boxes.filter((b) => !b.deleted && b.label).length} caja(s) etiquetada(s); no se borran, quedan guardadas.</li>}
+              {!!detail.in_datasets?.length && <li>Ya está en {detail.in_datasets.length === 1 ? "la versión" : "las versiones"} de dataset <b>{detail.in_datasets.join(", ")}</b>: {detail.in_datasets.length === 1 ? "esa versión no cambia" : "esas versiones no cambian"} porque son inmutables.</li>}
+              <li>El archivo de la imagen no se borra del disco.</li>
+            </ul>
+            <div className="formrow end"><button type="button" className="btn-outline" id="del-cancel" onClick={() => setConfirmDel(false)}>Cancelar</button><button type="button" className="btn-danger solid" id="delframe-ok" onClick={() => void trashNow()}>Eliminar captura</button></div>
+          </div>
+        </div>
+      )}
       {help && <HelpModal onClose={() => setHelp(false)} />}
     </div>
   );

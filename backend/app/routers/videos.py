@@ -137,6 +137,17 @@ def snapshot(frame_id: int, body: SnapshotIn, user: User = Depends(current_user)
     if idx is None:
         raise HTTPException(400, "t no coincide con ningún fotograma del video")
     existing = db.scalar(select(Frame).where(Frame.video_id == v.id, Frame.frame_index == idx))
+    if (
+        existing and existing.deleted_at is not None
+    ):  # la había eliminado: guardarla otra vez la devuelve de la papelera
+        existing.deleted_at = existing.deleted_by = None
+        db.add(
+            AuditLog(
+                user_id=user.id, project_id=existing.project_id, action="frame.restore", target=f"frame:{existing.id}"
+            )
+        )
+        db.commit()
+        return {"existing": False, "restored": True, "id": existing.id, "position": existing.position}
     if existing:
         return {"existing": True, "id": existing.id, "position": existing.position}
     try:

@@ -1,5 +1,6 @@
 """Exportación y restauración completa de un proyecto (datos y etiquetas; imágenes y videos van por ruta)."""
 
+import datetime as dt
 import gzip
 import json
 
@@ -69,6 +70,7 @@ def dump_project(db: Session, project: Project) -> dict:
                 "stratum": f.stratum,
                 "position": f.position,
                 "meta": f.meta,
+                "deleted": f.deleted_at is not None,
                 "proposals": [
                     {"bbox": [p.x, p.y, p.w, p.h], "sources": p.sources, "score": p.score} for p in f.proposals
                 ],
@@ -169,6 +171,7 @@ def restore_project(db: Session, data: dict, slug: str | None = None, name: str 
             stratum=f["stratum"],
             position=f["position"],
             meta=f["meta"],
+            deleted_at=dt.datetime.now(dt.timezone.utc) if f.get("deleted") else None,
         )
         row.proposals = [
             Proposal(

@@ -37,7 +37,13 @@ def preannotate(project_id: int, body: PreIn, user: User = Depends(current_user)
     if not m or m.project_id != p.id:
         raise HTTPException(404, "Modelo no encontrado")
     if body.scope == "frame_ids":
-        valid = set(db.scalars(select(Frame.id).where(Frame.project_id == p.id, Frame.id.in_(body.frame_ids or []))))
+        valid = set(
+            db.scalars(
+                select(Frame.id).where(
+                    Frame.project_id == p.id, Frame.deleted_at.is_(None), Frame.id.in_(body.frame_ids or [])
+                )
+            )
+        )
         if not valid:
             raise HTTPException(422, "Indique al menos una imagen del proyecto en frame_ids")
         body.frame_ids = sorted(valid)

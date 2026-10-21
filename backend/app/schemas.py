@@ -69,6 +69,11 @@ class LastEdit(BaseModel):
     at: str
 
 
+class DeletedInfo(BaseModel):
+    by: str | None
+    at: str
+
+
 class FrameOut(BaseModel):
     id: int
     position: int
@@ -88,6 +93,8 @@ class FrameOut(BaseModel):
     locked_by: str | None = None
     assigned_to_me: bool = False
     review: ReviewOut | None = None
+    deleted: DeletedInfo | None = None  # en la papelera: quién la eliminó y cuándo
+    in_datasets: list[str] = []  # versiones de dataset que ya incluyen esta imagen (no cambian aunque se elimine)
     last_edit: LastEdit | None = None  # modalidad colaborativa: quién modificó por última vez la versión vigente
 
 

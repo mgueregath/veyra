@@ -17,9 +17,9 @@ const ago = (iso: string) => {
 };
 
 /** Barra bajo la cabecera: imagen actual y su estado, herramientas, clase activa y zoom. */
-export default function Toolbar({ index, detail, editor, ui, classes, activeClass, canWrite, lockHolder, collab, onClass }: {
+export default function Toolbar({ index, detail, editor, ui, classes, activeClass, canWrite, lockHolder, collab, canTrash, onTrash, onClass }: {
   index: number; detail: FrameDetail | null; editor: BoxEditor | null; ui: EditorUi | undefined; classes: ClassDef[]; activeClass: string | undefined;
-  canWrite: boolean; lockHolder: string | null; collab: boolean; onClass: (id: string) => void;
+  canWrite: boolean; lockHolder: string | null; collab: boolean; canTrash: boolean; onTrash: () => void; onClass: (id: string) => void;
 }) {
   const status: Status = detail?.status ?? "pending";
   const pos = classes.filter((c) => !c.negative);
@@ -29,6 +29,7 @@ export default function Toolbar({ index, detail, editor, ui, classes, activeClas
       <div className="tb-title">
         <h1 id="imgtitle" title="Número de la imagen actual dentro de la lista">Imagen {index >= 0 ? index + 1 : "—"}</h1>
         <span id="statuschip" className={"pill st-" + status} title={(collab && status === "final" ? "Colaborativo: la última modificación es la versión final" : STATUS_TIP[status]) + (detail?.assigned_to_me ? " · está en tu cola" : "")}><i className="dot" />{collab && status === "final" && detail?.last_edit ? `Editada por ${detail.last_edit.user} · ${ago(detail.last_edit.at)}` : collab && status === "final" ? "Revisada" : STATUS_TEXT[status]}</span>
+        {detail?.deleted && <span id="trashchip" className="pill warn" title="Esta captura está eliminada: no cuenta en colas, estadísticas ni datasets nuevos"><Icon name="trash" size={13} />En la papelera</span>}
         {lockHolder && <span id="lockwarn" className="pill warn" title="Otra persona tiene abierta esta misma imagen; puedes seguir, pero conviene coordinarse"><Icon name="alert" size={13} />{lockHolder} también la tiene abierta</span>}
       </div>
       <div className="tb-tools">
@@ -41,6 +42,12 @@ export default function Toolbar({ index, detail, editor, ui, classes, activeClas
             <i className="dot" style={{ background: c.color }} />{c.name}<kbd>{c.digit}</kbd>
           </button>
         ))}
+        {canTrash && !detail?.deleted && (
+          <>
+            <span className="tb-div" />
+            <button id="delframe" className="tbtn dangerbtn" disabled={!detail} title="Eliminar esta captura si no aporta nada: va a la papelera, no cuenta en colas ni datasets nuevos y se puede restaurar" onClick={onTrash} {...nb}><Icon name="trash" size={15} /> Eliminar</button>
+          </>
+        )}
       </div>
       <div className="tb-zoom">
         <div className="zgroup" title="Zoom de la imagen">

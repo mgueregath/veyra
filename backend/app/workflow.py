@@ -36,7 +36,7 @@ def latest_annotations(
     q = (
         select(Annotation)
         .join(Frame, Frame.id == Annotation.frame_id)
-        .where(Frame.project_id == project.id)
+        .where(Frame.project_id == project.id, Frame.deleted_at.is_(None))
         .order_by(Annotation.frame_id, Annotation.updated_at, Annotation.id)
     )
     if boxes:
@@ -81,7 +81,7 @@ def compute_states(db: Session, project: Project, frame_ids: list[int] | None = 
         select(Annotation)
         .join(Frame, Frame.id == Annotation.frame_id)
         .options(selectinload(Annotation.boxes))
-        .where(Frame.project_id == project.id, Annotation.reviewed)
+        .where(Frame.project_id == project.id, Frame.deleted_at.is_(None), Annotation.reviewed)
         .order_by(Annotation.frame_id, Annotation.id)
     )
     if frame_ids is not None:
@@ -89,7 +89,11 @@ def compute_states(db: Session, project: Project, frame_ids: list[int] | None = 
     by_frame: dict[int, list[Annotation]] = {}
     for a in db.scalars(q):
         by_frame.setdefault(a.frame_id, []).append(a)
-    rq = select(Review).join(Frame, Frame.id == Review.frame_id).where(Frame.project_id == project.id)
+    rq = (
+        select(Review)
+        .join(Frame, Frame.id == Review.frame_id)
+        .where(Frame.project_id == project.id, Frame.deleted_at.is_(None))
+    )
     if frame_ids is not None:
         rq = rq.where(Review.frame_id.in_(frame_ids))
     reviews = {r.frame_id: r for r in db.scalars(rq)}

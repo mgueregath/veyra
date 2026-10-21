@@ -82,6 +82,10 @@ class Frame(Base):
     stratum: Mapped[str | None] = mapped_column(String(32))
     position: Mapped[int] = mapped_column(Integer, default=0)  # orden de presentación dentro del proyecto
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # papelera: una captura eliminada deja de contar en colas, estadísticas y versiones NUEVAS de dataset
+    # (se puede restaurar; las versiones de dataset ya creadas la conservan)
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     video: Mapped[Video] = relationship()
     proposals: Mapped[list[Proposal]] = relationship(
         back_populates="frame", order_by="Proposal.id", cascade="all, delete-orphan"
