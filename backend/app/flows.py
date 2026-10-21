@@ -181,3 +181,24 @@ def classes_of(db: Session, project: Project, raw: dict) -> list[str]:
             m = db.get(Model, int(leaf.source[6:]))
             out += [c for c in (m.classes if m else []) if c not in out]
     return out or [c["id"] for c in (project.config or {}).get("classes", []) if not c.get("negative")]
+
+
+def live_bundle(db: Session, project: Project, raw: dict) -> dict:
+    """Flujo para sesiones en vivo: el proceso del worker lo evalúa en cada fotograma con los pesos de cada modelo.
+
+    Solo admite modelos y procedimientos; la apariencia del proyecto y las propuestas guardadas trabajan sobre imágenes
+    sueltas de la API y no están disponibles en el flujo continuo.
+    """
+    node = validate(db, project, raw)
+    models: dict[str, dict] = {}
+    for leaf in leaves(node):
+        if leaf.source.startswith("model:"):
+            m = db.get(Model, int(leaf.source[6:]))
+            if not m.path:
+                raise FlowError(f"el modelo «{m.name}» no tiene pesos")
+            models[str(m.id)] = {"path": m.path, "classes": list(m.classes or [])}
+        elif not leaf.source.startswith("procedure:"):
+            raise FlowError(
+                f"«{leaf.source}» no se puede usar en video ni cámaras en vivo (solo modelos y procedimientos)"
+            )
+    return {"slug": project.slug, "spec": node.model_dump(exclude_none=True), "models": models}

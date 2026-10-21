@@ -153,7 +153,7 @@ try:
     c.eval("document.getElementById('lv-start').click()")
     check("detectar imágenes con un flujo muestra el resultado combinado (Y: solo la caja que ambas fuentes confirman)", wait_for(c, "!!document.querySelector('#img-view img')&&document.querySelectorAll('#img-view .det').length===1", 40), c.eval("document.querySelectorAll('#img-view .det').length"))
     c.eval("document.getElementById('lv-kind-video').click()"); time.sleep(0.4)
-    check("con un flujo elegido, video y cámara avisan que de momento solo van con modelos y no se pueden iniciar", c.eval("!!document.getElementById('flow-live-note')&&document.getElementById('lv-start').disabled"))
+    check("con un flujo elegido, video y cámara se pueden iniciar y avisan que el umbral no aplica (cada fuente trae el suyo)", c.eval("!!document.getElementById('flow-live-note')&&!document.getElementById('lv-start').disabled&&document.getElementById('lc-thr').disabled"))
     c.eval("document.getElementById('lv-kind-images').click()"); time.sleep(0.2)
     # sesión viva para el lector
     run = root.call("POST", f"/api/projects/{PID}/live", {"source_kind": "video", "video_id": root.get(f"/api/projects/{PID}/videos")[0]["id"], "model_id": MID, "threshold": 0.25, "imgsz": 640, "no_realtime": True})

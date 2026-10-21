@@ -62,7 +62,7 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
   const start = useMutation({
     mutationFn: () => api.liveStart(project.id, {
       source_kind: source === "url" ? "url" : "video", video_id: source === "video" ? Number(videoId || files[0]?.id) : undefined, url: source === "url" ? url : undefined,
-      model_id: modelId, threshold: thr, imgsz, name: `${model?.name ?? "modelo"} · ${source === "video" ? files.find((v) => v.id === Number(videoId || files[0]?.id))?.name ?? "video" : "cámara"}`,
+      ...(flowId !== null ? { flow_id: flowId } : { model_id: modelId }), threshold: thr, imgsz, name: `${flowId !== null ? "flujo" : model?.name ?? "modelo"} · ${source === "video" ? files.find((v) => v.id === Number(videoId || files[0]?.id))?.name ?? "video" : "cámara"}`,
     }),
     onSuccess: (s) => { setSel(s.id); setMsg(null); void qc.invalidateQueries({ queryKey: ["live", project.id] }); },
     onError: (e) => setMsg({ t: (e as Error).message, ok: false }),
@@ -257,16 +257,16 @@ export default function RunPage({ project, user, modelId, onBack, onProjects, on
               </>
             )}
             <label className="fld">Umbral de confianza
-              <span className="thr"><input type="range" id="lc-thr" title="Umbral de detección: más alto muestra solo lo más seguro; más bajo muestra más (y más falsos positivos)" min={0} max={1} step={0.01} value={thrNow} disabled={!operate} onChange={(e) => onThr(+e.target.value)} /><output>{thrNow.toFixed(2).replace(".", ",")}</output></span></label>
+              <span className="thr"><input type="range" id="lc-thr" title="Umbral de detección: más alto muestra solo lo más seguro; más bajo muestra más (y más falsos positivos)" min={0} max={1} step={0.01} value={thrNow} disabled={!operate || (live && flowId !== null)} onChange={(e) => onThr(+e.target.value)} /><output>{thrNow.toFixed(2).replace(".", ",")}</output></span></label>
             {operate && (
               <label className="fld">Resolución de entrada
                 <select id="lv-imgsz" disabled={busy || source === "images"} title="Resolución a la que corre el modelo: más baja va más rápido, más alta ve mejor lo pequeño" value={imgsz} onChange={(e) => setImgsz(+e.target.value)}>{[...new Set([640, 960, 1280, 1600, 1920, imgsz])].sort((a, b) => a - b).map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
             )}
-            {operate && live && flowId !== null && <p className="note warnt" id="flow-live-note"><Icon name="alert" size={15} /> Los flujos funcionan sobre imágenes. Para video o cámara en vivo elige un modelo (el soporte de flujos en vivo viene después).</p>}
+            {operate && live && flowId !== null && <p className="note" id="flow-live-note"><Icon name="info" size={15} /> El flujo se evalúa en cada fotograma: cada fuente usa su propio puntaje mínimo y el umbral de arriba no se aplica. Solo admite modelos y procedimientos del espacio del proyecto.</p>}
             {operate && running && live && <p className="note"><Icon name="info" size={15} /> Detén la sesión para cambiar la fuente o la resolución.</p>}
             {operate && (source === "images"
               ? <button className="primary big" id="lv-start" disabled={detect.isPending || (imgMode === "upload" && !upload.length)} onClick={() => detect.mutate()}>{detect.isPending ? "Detectando…" : "Detectar imágenes"}</button>
-              : !running && <button className="primary big" id="lv-start" title="Inicia la sesión: arranca el proceso, carga el modelo y abre la fuente (puede tardar unos segundos)" disabled={flowId !== null || start.isPending || (source === "url" && !url) || (source === "video" && !files.length)} onClick={() => start.mutate()}>{start.isPending ? "Iniciando (carga el modelo)…" : source === "video" ? "Iniciar ejecución" : "Iniciar en vivo"}</button>)}
+              : !running && <button className="primary big" id="lv-start" title="Inicia la sesión: arranca el proceso, carga el modelo y abre la fuente (puede tardar unos segundos)" disabled={start.isPending || (source === "url" && !url) || (source === "video" && !files.length)} onClick={() => start.mutate()}>{start.isPending ? "Iniciando (carga el modelo)…" : source === "video" ? "Iniciar ejecución" : "Iniciar en vivo"}</button>)}
 
             <hr />
             <h3>{live ? "Únicos en la sesión" : "En esta imagen"}<small>{live ? "Objetos distintos confirmados." : "Con el umbral actual."}</small></h3>

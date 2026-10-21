@@ -11,11 +11,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import live, usage
+from .. import flows, live, usage
 from ..config import settings
 from ..db import get_db
 from ..deps import current_user, role_in
 from ..models import AuditLog, Frame, LiveSession, Model, Project, Proposal, User, Video
+from .flows import get_flow
 
 router = APIRouter(prefix="/api", tags=["live"])
 OPERATE = {"admin", "reviewer"}
@@ -27,6 +28,7 @@ class LiveIn(BaseModel):
     video_id: int | None = None
     url: str | None = None
     model_id: int | None = None
+    flow_id: int | None = None  # flujo de detección (modelos y/o procedimientos del espacio); excluyente con model_id
     threshold: float = Field(0.25, ge=0, le=1)
     imgsz: int = Field(1280, ge=320, le=2048)
     loop: bool = True
@@ -102,7 +104,15 @@ def start_session(project_id: int, body: LiveIn, user: User = Depends(current_us
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
         label = live.mask_source(source, "url")
-    model = None
+    if body.model_id is not None and body.flow_id is not None:
+        raise HTTPException(422, "Indique un modelo (model_id) o un flujo (flow_id), no ambos")
+    model, flow, flow_row = None, None, None
+    if body.flow_id is not None:
+        flow_row = get_flow(db, p, body.flow_id)
+        try:
+            flow = flows.live_bundle(db, p, flow_row.spec)
+        except flows.FlowError as e:
+            raise HTTPException(422, str(e)) from None
     if body.model_id is not None:
         model = db.get(Model, body.model_id)
         if not model or model.project_id != p.id:
@@ -119,7 +129,13 @@ def start_session(project_id: int, body: LiveIn, user: User = Depends(current_us
         source_kind=body.source_kind,
         source=source,
         status="starting",
-        params={"threshold": body.threshold, "imgsz": body.imgsz, "loop": body.loop, "no_realtime": body.no_realtime},
+        params={
+            "threshold": body.threshold,
+            "imgsz": body.imgsz,
+            "loop": body.loop,
+            "no_realtime": body.no_realtime,
+            **({"flow_id": flow_row.id, "flow_name": flow_row.name} if flow_row else {}),
+        },
     )
     db.add(s)
     db.flush()
@@ -129,6 +145,7 @@ def start_session(project_id: int, body: LiveIn, user: User = Depends(current_us
             model.path if model else None,
             model.classes if model else [],
             Path(settings.runs_root) / "live" / str(s.id),
+            flow,
         )
     except RuntimeError as e:
         s.status, s.error, s.ended_at = "failed", str(e), dt.datetime.now(dt.timezone.utc)
@@ -141,7 +158,7 @@ def start_session(project_id: int, body: LiveIn, user: User = Depends(current_us
             project_id=p.id,
             action="live.start",
             target=f"live:{s.id}",
-            detail={"kind": s.source_kind, "model_id": s.model_id},
+            detail={"kind": s.source_kind, "model_id": s.model_id, "flow_id": s.params.get("flow_id")},
         )
     )
     db.commit()

@@ -338,3 +338,71 @@ def test_procedure_flow_without_workers_is_refused_clearly(client, world, db, tr
     r = admin.post(f"/api/projects/{pid}/detect", json={"flow_id": fid, "first": 1})
     assert r.status_code == 424 and "worker" in r.json()["detail"].lower()
     assert db.query(DetectionFlow).count() == 1
+
+
+# ---------------------------------------------------------------- video y cámaras en vivo con flujo
+def live_flow_worker(seen):
+    def handler(w, job):
+        seen.append(job["payload"])
+        w.c.post(
+            f"/api/worker/jobs/{job['id']}/progress",
+            json={"endpoint": "http://127.0.0.1:9", "token": "tok-flow", "pid": 1},
+        )
+        while job["id"] not in w.cancel_seen:
+            time.sleep(0.1)
+        return {"status": "cancelled"}
+
+    c, _ = make_worker("gpu-live")
+    w = FakeWorker(c, kinds=("live", "workspace"), handlers={"live": handler})
+    w.start()
+    time.sleep(0.8)
+    return w
+
+
+def test_live_session_with_a_flow_sends_models_and_procedures_to_the_worker(
+    client, world, db, trained, vfr_video, monkeypatch
+):
+    from app import live
+    from app.models import LiveSession, Video
+
+    admin, pid, mid = trained
+    monkeypatch.setattr(settings, "gpu_mode", "auto")
+    v = db.query(Video).filter(Video.name == "v1").one()
+    v.path = str(vfr_video)
+    db.commit()
+    spec = group("or", leaf(f"model:{mid}", min_score=0.3), leaf("procedure:manchas", ref="v1"))
+    fid = make_flow(admin, pid, "en vivo", spec)
+    seen: list[dict] = []
+    w = live_flow_worker(seen)
+    r = admin.post(
+        f"/api/projects/{pid}/live", json={"source_kind": "video", "video_id": v.id, "flow_id": fid, "imgsz": 640}
+    )
+    assert r.status_code == 200, r.text
+    sess = db.get(LiveSession, r.json()["id"])
+    assert sess.model_id is None and sess.params["flow_id"] == fid and sess.token == "tok-flow"
+    flow = seen[0]["flow"]
+    assert flow["slug"] == db.get(Project, pid).slug and flow["models"][str(mid)]["classes"]
+    assert flow["spec"]["op"] == "or" and flow["spec"]["inputs"][1] == {
+        "source": "procedure:manchas",
+        "min_score": 0.0,
+        "ref": "v1",
+        "params": {},
+    }
+    assert "weights" not in seen[0]
+    assert admin.delete(f"/api/live/{sess.id}").status_code == 200
+    w.stop.set()
+    live.stop_all()
+
+
+def test_live_flow_rejections(client, world, db, trained, vfr_video):
+    admin, pid, mid = trained
+    v = db.query(__import__("app.models", fromlist=["Video"]).Video).filter_by(name="v1").one()
+    v.path = str(vfr_video)
+    db.commit()
+    body = {"source_kind": "video", "video_id": v.id}
+    solo_img = make_flow(admin, pid, "proposals", group("or", leaf(f"model:{mid}"), leaf("proposals:motion")))
+    r = admin.post(f"/api/projects/{pid}/live", json={**body, "flow_id": solo_img})
+    assert r.status_code == 422 and "en vivo" in r.json()["detail"]
+    ok = make_flow(admin, pid, "ok", leaf(f"model:{mid}"))
+    assert admin.post(f"/api/projects/{pid}/live", json={**body, "flow_id": ok, "model_id": mid}).status_code == 422
+    assert admin.post(f"/api/projects/{pid}/live", json={**body, "flow_id": 9999}).status_code == 404

@@ -75,14 +75,17 @@ def _base(sess: LiveSession) -> str:
     return sess.endpoint or f"http://127.0.0.1:{sess.port}"
 
 
-def start_worker(sess: LiveSession, weights: str | None, classes: list[str], record_dir: Path) -> None:
+def start_worker(
+    sess: LiveSession, weights: str | None, classes: list[str], record_dir: Path, flow: dict | None = None
+) -> None:
     """Lanza el proceso y espera a que esté listo (cargar el modelo tarda). Lanza RuntimeError si no arranca."""
     prm = sess.params
     with SessionLocal() as db:
-        worker = remote.pick_worker(db, "live")
+        # los flujos corren en un contenedor del espacio del proyecto: solo un worker con Docker puede hacerlo
+        worker = remote.pick_worker(db, "workspace", force=True) if flow else remote.pick_worker(db, "live")
         worker_id = worker.id if worker else None
     if worker_id is not None:
-        _start_remote(sess, weights, classes, record_dir, worker_id)
+        _start_remote(sess, weights, classes, record_dir, worker_id, flow)
         return
     port, token = _free_port(), new_token()
     detector = settings.live_detector or ("yolo" if weights else "none")
@@ -138,7 +141,14 @@ def start_worker(sess: LiveSession, weights: str | None, classes: list[str], rec
     sess.port, sess.token, sess.pid = port, token, p.pid
 
 
-def _start_remote(sess: LiveSession, weights: str | None, classes: list[str], record_dir: Path, worker_id: int) -> None:
+def _start_remote(
+    sess: LiveSession,
+    weights: str | None,
+    classes: list[str],
+    record_dir: Path,
+    worker_id: int,
+    flow: dict | None = None,
+) -> None:
     """La sesión corre en un worker: se le encarga y se espera a que diga dónde escucha."""
     prm = sess.params
     payload = {
@@ -153,6 +163,8 @@ def _start_remote(sess: LiveSession, weights: str | None, classes: list[str], re
     }
     if weights:
         payload["weights"] = weights
+    if flow:
+        payload["flow"] = flow
     jid = remote.submit("live", payload, worker_id)
     snap = remote.wait(
         jid,

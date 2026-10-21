@@ -7,7 +7,9 @@ espacio de trabajo. Se arma en la interfaz («Flujos…» junto al selector de d
 - **Ejecución sobre imágenes** (Modelos → Ejecutar modelo → Imágenes), del proyecto o subidas.
 - **Evaluación** (Gestión → Evaluación): el flujo se mide como cualquier detector, con las mismas métricas.
 
-> Video y cámara en vivo todavía solo admiten un modelo; los flujos en vivo son una etapa posterior.
+- **Video y cámara en vivo** (Modelos → Ejecutar modelo → Video / Cámara): modelo **o** flujo, a elección y de forma independiente en cada fuente (imágenes, video, cámara).
+
+> En vivo el flujo solo admite **modelos** y **procedimientos** (el detector de apariencia y las propuestas guardadas trabajan sobre imágenes sueltas). Se evalúa en cada fotograma: cada fuente usa su propio puntaje mínimo y el umbral de la pantalla no se aplica.
 
 ## Cómo se combinan
 
@@ -52,3 +54,10 @@ Dependencias: las del entorno virtual del proyecto (`pip install …` en el espa
 `GET/POST /api/projects/{id}/flows`, `PUT/DELETE …/flows/{id}`, `GET …/procedures` (administración y revisión),
 `POST …/detect` y `…/detect/upload` con `flow_id`, `POST …/preannotations` con `flow_id`, evaluación con `detector: "flow:<id>"`.
 Especificación: `{"op": "and", "inputs": [{"source": "model:3", "min_score": 0.25}, {"op": "or", "inputs": [...]}], "iou": 0.3}`.
+
+## En vivo
+
+La sesión con flujo corre en el worker dentro de un contenedor de la imagen del espacio del proyecto (el mismo entorno virtual donde
+se desarrollaron los procedimientos), con el repositorio y los datos en solo lectura y GPU. Se publica solo el puerto de la sesión.
+A diferencia de los procedimientos por lotes, el contenedor **tiene red** (las cámaras la necesitan). Requiere un worker con
+`workspace` entre sus tipos de trabajo; `POST …/live` acepta `flow_id` (excluyente con `model_id`).
