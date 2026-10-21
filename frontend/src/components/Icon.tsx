@@ -4,7 +4,7 @@ import {
   LuInfo, LuMaximize, LuMinus, LuPause, LuPlay, LuPlus, LuSettings, LuSkipBack, LuSkipForward, LuSquare, LuStepBack, LuStepForward,
   LuTriangleAlert, LuUndo2, LuShieldCheck, LuUsers, LuDatabase, LuCpu, LuSparkles, LuChartColumn, LuServer, LuFolder, LuImage,
   LuSearch, LuLayoutGrid, LuList, LuArrowRight, LuEllipsis, LuKeyboard, LuExternalLink, LuTrash2, LuCircleCheck, LuX, LuCircleAlert,
-  LuTag, LuClipboardCheck, LuUser, LuLock, LuEyeOff, LuTerminal, LuKeyRound, LuCopy, LuPower, LuRefreshCw,
+  LuTag, LuClipboardCheck, LuUser, LuLock, LuEyeOff, LuTerminal, LuKeyRound, LuCopy, LuPower, LuRefreshCw, LuUpload,
 } from "react-icons/lu";
 
 /** Iconos de react-icons (juego Lucide). El resto de la interfaz los pide por nombre. */
@@ -16,7 +16,7 @@ const ICONS = {
   shield: LuShieldCheck, users: LuUsers, database: LuDatabase, cpu: LuCpu, sparkles: LuSparkles, chart: LuChartColumn, server: LuServer,
   folder: LuFolder, image: LuImage, search: LuSearch, grid: LuLayoutGrid, list: LuList, arrowRight: LuArrowRight, more: LuEllipsis,
   keyboard: LuKeyboard, external: LuExternalLink, trash: LuTrash2, checkCircle: LuCircleCheck, x: LuX, alertCircle: LuCircleAlert,
-  tag: LuTag, clipboard: LuClipboardCheck, user: LuUser, lock: LuLock, eyeOff: LuEyeOff, terminal: LuTerminal, key: LuKeyRound, copy: LuCopy, power: LuPower, refresh: LuRefreshCw,
+  tag: LuTag, clipboard: LuClipboardCheck, user: LuUser, lock: LuLock, eyeOff: LuEyeOff, terminal: LuTerminal, key: LuKeyRound, copy: LuCopy, power: LuPower, refresh: LuRefreshCw, upload: LuUpload,
 } satisfies Record<string, IconType>;
 
 export type IconName = keyof typeof ICONS;

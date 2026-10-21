@@ -289,3 +289,10 @@ progress::-webkit-progress-bar{background:#ded5dc;border-radius:7px}progress::-w
 .fadd{display:flex;gap:8px}
 .flowtext{margin:2px 0;background:var(--soft);border-radius:8px;padding:8px 12px;font-size:14px}
 .detsel{display:inline-flex;gap:8px;align-items:center;width:100%}.detsel select{flex:1;min-width:0}
+
+/* carga de datos */
+.dropzone{display:flex;flex-direction:column;align-items:center;gap:6px;padding:28px;margin:14px 0;border:2px dashed #a89ca6;border-radius:12px;background:#fff;color:var(--muted);cursor:pointer;text-align:center}
+.dropzone:hover,.dropzone.over{border-color:var(--accent,#6b3f8f);background:#f8f3fa}
+.dropzone b{color:inherit;font-size:16px}.dropzone small{font-size:13px}
+.importnote{margin:12px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:14px;display:flex;flex-direction:column;gap:4px}
+#import .panel + .panel{margin-top:18px}#import ul{margin:6px 0 10px;padding-left:20px}

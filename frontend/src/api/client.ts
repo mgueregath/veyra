@@ -82,6 +82,29 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+export interface ImportImagesResult { images: number; with_labels: number; boxes: number; skipped: string[]; warnings: string[]; batch: string }
+export interface ImportVideoResult { video_id: number; name: string; frames: number; duration: number; fps: number }
+
+/** Subida con progreso (fetch no lo informa). */
+function upload<T>(path: string, fd: FormData, onProgress: (frac: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", path);
+    x.withCredentials = true;
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onerror = () => reject(new ApiError(0, "Se cortó la conexión durante la subida"));
+    x.onload = () => {
+      let body: unknown = null;
+      try { body = JSON.parse(x.responseText); } catch { /* sin cuerpo JSON */ }
+      if (x.status >= 200 && x.status < 300) return resolve(body as T);
+      const d = (body as { detail?: unknown } | null)?.detail;
+      const hint = x.status === 413 ? "El archivo supera el tamaño que acepta el servidor" : x.statusText;
+      reject(new ApiError(x.status, typeof d === "string" ? d : d ? JSON.stringify(d) : hint));
+    };
+    x.send(fd);
+  });
+}
+
 export const api = {
   me: () => req<Me>("/api/me"),
   login: (username: string, password: string) => req<Me>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
@@ -147,6 +170,18 @@ export const api = {
       throw new ApiError(r.status, typeof msg === "string" ? msg : JSON.stringify(msg));
     }
     return r.json() as Promise<DetectResult>;
+  },
+  importImages: (pid: number, files: File[], reviewed: boolean, onProgress: (f: number) => void) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    fd.append("reviewed", String(reviewed));
+    return upload<ImportImagesResult>(`/api/projects/${pid}/import/images`, fd, onProgress);
+  },
+  importVideo: (pid: number, file: File, samples: number, onProgress: (f: number) => void) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("samples", String(samples));
+    return upload<ImportVideoResult>(`/api/projects/${pid}/import/video`, fd, onProgress);
   },
   flows: (pid: number) => req<Flow[]>(`/api/projects/${pid}/flows`),
   createFlow: (pid: number, body: { name: string; spec: FlowNode }) => req<Flow>(`/api/projects/${pid}/flows`, { method: "POST", body: JSON.stringify(body) }),

@@ -140,6 +140,22 @@ try:
     n0 = c.eval("window.__lh.editor.doc.boxes.length")
     c.eval("document.getElementById('refresh-assisted').click()")
     check("«Refrescar asistido» vuelve a proponer las cajas del detector elegido sobre la imagen actual", wait_for(c, f"window.__lh.editor.doc.boxes.length>{n0}&&window.__lh.editor.doc.boxes.some(b=>b.sources.some(s=>s.startsWith('flow:')))&&!document.getElementById('refresh-assisted').disabled", 40), c.eval("window.__lh.editor.doc.boxes.length"))
+    # cargar imágenes con etiquetas desde Gestión → Cargar datos
+    import base64
+
+    b64 = base64.b64encode(img.read_bytes()).decode()
+    c.eval(f"location.hash='p={PID}&v=admin'"); time.sleep(0.5); c.eval("location.reload()"); time.sleep(2.5)
+    wait_for(c, "!!document.getElementById('tab-import')")
+    c.eval("document.getElementById('tab-import').click()")
+    check("la gestión ofrece cargar imágenes y videos", wait_for(c, "!!document.getElementById('imp-files')&&!!document.getElementById('imp-vfiles')"))
+    n_before = len(root.get(f"/api/projects/{PID}/frames"))
+    c.eval("""(()=>{const b=atob('%s'),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+      const dt=new DataTransfer();dt.items.add(new File([u],'nueva.jpg',{type:'image/jpeg'}));dt.items.add(new File(['0 0.5 0.5 0.1 0.1\\n'],'nueva.txt',{type:'text/plain'}));dt.items.add(new File(['Piojo\\nMosca\\n'],'classes.txt',{type:'text/plain'}));
+      const i=document.getElementById('imp-files');i.files=dt.files;i.dispatchEvent(new Event('change',{bubbles:true}))})()""" % b64)
+    check("elegir archivos resume cuántas imágenes y archivos de etiquetas hay", wait_for(c, "document.getElementById('imp-summary')?.textContent.includes('1 imagen ')&&document.getElementById('imp-summary').textContent.includes('2 de etiquetas')"), c.eval("document.getElementById('imp-summary')?.textContent"))
+    c.eval("document.getElementById('imp-send').click()")
+    check("cargar al proyecto informa imágenes y cajas", wait_for(c, "document.getElementById('imp-result')?.textContent.includes('1 imagen cargada')&&document.getElementById('imp-result').textContent.includes('1 caja')", 20), c.eval("document.getElementById('imp-result')?.textContent||document.getElementById('imp-err')?.textContent"))
+    check("la imagen cargada aparece en el proyecto con su etiqueta", len(root.get(f"/api/projects/{PID}/frames")) == n_before + 1)
     print("\nRESUMEN: %d/%d OK" % (sum(res.values()), len(res)))
 finally:
     from app import training

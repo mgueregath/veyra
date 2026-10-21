@@ -15,6 +15,7 @@ from .routers import (
     detect,
     evaluations,
     frames,
+    imports,
     models,
     projects,
     videos,
@@ -51,6 +52,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(frames.router)
+app.include_router(imports.router)
 app.include_router(videos.router)
 app.include_router(workflow.router)
 app.include_router(datasets.router)

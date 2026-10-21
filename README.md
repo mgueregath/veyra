@@ -17,6 +17,7 @@ Plan y resultados medidos: [docs/PLAN.md](docs/PLAN.md).
 | Equipo | Proyectos, roles (administrador, revisor, etiquetador, lector), cola de trabajo con bloqueo atómico, reparto con doble etiquetado, flujo etiquetador → revisor, acuerdo entre personas |
 | Datos | Versiones de dataset inmutables con reparto train/val/test **por video**, exportación YOLO y COCO |
 | Modelos | Evaluación (mAP, precisión, recall, F1, conteo por video, ejemplos de errores) de líneas base y modelos; entrenamiento YOLO en la GPU con cola, registro y cancelación; preanotación con un modelo y búsqueda de las imágenes más inciertas |
+| Carga de datos | Gestión → Cargar datos: imágenes sueltas o .zip, con o sin etiquetas (YOLO: .txt + classes.txt/data.yaml; COCO: .json), y videos (mp4, mov, m4v, avi, mkv, webm) con fotogramas iniciales para etiquetar |
 | En vivo | Sesiones sobre un video o una cámara RTSP/MJPEG: flujo con cajas, velocidad y latencia, umbral, pausa, grabación de clips, recuento, y «guardar fotograma» que vuelve al etiquetado |
 | Operación | Gestión del equipo, uso de disco y cuota, estado del servicio, copia y restauración de un proyecto, copia verificada de la base |
 

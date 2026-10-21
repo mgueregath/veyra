@@ -1,0 +1,273 @@
+import datetime as dt
+import io
+import shutil
+import zipfile
+from pathlib import Path, PurePosixPath
+
+import cv2
+import numpy as np
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from .. import imports as imp
+from .. import usage
+from .. import video as vid
+from ..config import settings
+from ..db import get_db
+from ..deps import current_user, role_in
+from ..models import Annotation, AnnotationBox, AuditLog, Frame, Project, User, Video
+from .videos import _LOCK
+
+router = APIRouter(prefix="/api", tags=["import"])
+ROLES = {"admin", "reviewer"}
+MAX_ENTRIES = 5000
+MAX_UNZIPPED = 4 * 1024**3
+MAX_IMAGE_PIXELS = 100_000_000
+
+
+def _project(db: Session, user: User, pid: int) -> Project:
+    p = db.get(Project, pid)
+    role = role_in(db, user, pid) if p else None
+    if not p or not role:
+        raise HTTPException(404, "Proyecto no encontrado")
+    if role not in ROLES:
+        raise HTTPException(403, "Solo administración y revisión pueden cargar imágenes y videos")
+    return p
+
+
+def _uniq_video_name(db: Session, pid: int, base: str) -> str:
+    name, n = base, 1
+    while db.scalar(select(Video.id).where(Video.project_id == pid, Video.name == name)):
+        n += 1
+        name = f"{base}-{n}"
+    return name
+
+
+async def _expand(files: list[UploadFile]) -> dict[str, bytes]:
+    """Todos los archivos por nombre (los .zip se abren; cada nombre conserva solo su parte final)."""
+    out: dict[str, bytes] = {}
+    for f in files:
+        data = await f.read()
+        name = f.filename or "archivo"
+        if name.lower().endswith(".zip"):
+            try:
+                z = zipfile.ZipFile(io.BytesIO(data))
+            except zipfile.BadZipFile:
+                raise HTTPException(422, f"«{name}» no es un zip válido") from None
+            infos = [i for i in z.infolist() if not i.is_dir() and not PurePosixPath(i.filename).name.startswith(".")]
+            if len(infos) > MAX_ENTRIES or sum(i.file_size for i in infos) > MAX_UNZIPPED:
+                raise HTTPException(422, f"«{name}» es demasiado grande (máximo {MAX_ENTRIES} archivos y 4 GB)")
+            for i in infos:
+                out.setdefault(PurePosixPath(i.filename).name, z.read(i))
+        else:
+            out.setdefault(PurePosixPath(name.replace("\\", "/")).name, data)
+        if len(out) > MAX_ENTRIES:
+            raise HTTPException(422, f"Demasiados archivos (máximo {MAX_ENTRIES} por carga)")
+    return out
+
+
+@router.post("/projects/{project_id}/import/images")
+async def import_images(
+    project_id: int,
+    files: list[UploadFile] = File(...),
+    reviewed: bool = Form(False),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Agrega imágenes al proyecto, con o sin etiquetas (YOLO o COCO), que quedan como trabajo de quien las carga."""
+    p = _project(db, user, project_id)
+    allf = await _expand(files)
+    images = {n: d for n, d in allf.items() if PurePosixPath(n).suffix.lower() in imp.IMAGE_EXT}
+    if not images:
+        raise HTTPException(422, "No hay imágenes (se admiten jpg, png, bmp y webp, sueltas o dentro de un zip)")
+    try:
+        usage.check_quota(db, p)
+        names = imp.parse_names(allf)
+        classes = (p.config or {}).get("classes", [])
+        resolve, warnings = imp.class_resolver(classes, names)
+        coco: dict[str, list[dict]] = {}
+        for n, d in allf.items():
+            if n.lower().endswith(".json"):
+                by_name = {str(c.get("name", "")).lower(): c["id"] for c in classes} | {
+                    str(c["id"]).lower(): c["id"] for c in classes
+                }
+
+                def by_label(nm: str, _m=by_name):
+                    got = _m.get(nm.lower())
+                    if got is None and nm:
+                        warnings.add(f"la clase «{nm}» no existe en el proyecto: sus cajas quedan sin etiquetar")
+                    return got
+
+                c, _ = imp.parse_coco(d, by_label)
+                coco.update(c)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    v = Video(project_id=p.id, name=_uniq_video_name(db, p.id, f"subidas-{stamp}"), path=None, meta={"origin": "carga"})
+    db.add(v)
+    db.flush()
+    rel_dir = f"uploads/{p.slug}/{v.name}"
+    out_dir = Path(settings.media_root) / rel_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pos = (db.scalar(select(func.max(Frame.position)).where(Frame.project_id == p.id)) or 0) + 1
+    res = {"images": 0, "with_labels": 0, "boxes": 0, "skipped": []}
+    try:
+        for idx, (name, data) in enumerate(sorted(images.items()), 1):
+            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if img is None or img.shape[0] * img.shape[1] > MAX_IMAGE_PIXELS:
+                res["skipped"].append(f"{name}: no es una imagen legible")
+                continue
+            h, w = img.shape[:2]
+            stem = PurePosixPath(name).stem
+            if name in coco:
+                boxes = coco[name]
+            else:
+                txt = allf.get(stem + ".txt")
+                boxes = imp.parse_yolo(txt.decode("utf-8-sig", "replace"), w, h, resolve) if txt is not None else None
+            ext = PurePosixPath(name).suffix.lower()
+            fname = f"{idx:05d}_{imp.safe_name(stem)}{ext}"
+            (out_dir / fname).write_bytes(data)
+            fr = Frame(
+                project_id=p.id,
+                video_id=v.id,
+                frame_index=idx,
+                t=None,
+                image_path=f"{rel_dir}/{fname}",
+                width=w,
+                height=h,
+                stratum="carga",
+                position=pos,
+                meta={"origin": "carga", "original_name": name},
+            )
+            pos += 1
+            db.add(fr)
+            res["images"] += 1
+            if boxes is not None:
+                db.flush()
+                ann = Annotation(frame_id=fr.id, user_id=user.id, reviewed=bool(reviewed))
+                ann.boxes = [
+                    AnnotationBox(
+                        x=b["bbox"][0],
+                        y=b["bbox"][1],
+                        w=b["bbox"][2],
+                        h=b["bbox"][3],
+                        label=b["label"],
+                        manual=True,
+                        sources=["import"],
+                        score=None,
+                    )
+                    for b in boxes
+                ]
+                db.add(ann)
+                res["with_labels"] += 1
+                res["boxes"] += len(boxes)
+        if not res["images"]:
+            raise HTTPException(422, "Ninguna imagen se pudo leer: " + "; ".join(res["skipped"][:3]))
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                project_id=p.id,
+                action="import.images",
+                target=f"video:{v.id}",
+                detail={k: res[k] for k in ("images", "with_labels", "boxes")},
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        shutil.rmtree(out_dir, ignore_errors=True)
+        raise
+    return {**res, "skipped": res["skipped"][:20], "warnings": sorted(warnings), "batch": v.name}
+
+
+@router.post("/projects/{project_id}/import/video")
+def import_video(
+    project_id: int,
+    file: UploadFile = File(...),
+    samples: int = Form(8),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Agrega un video: queda disponible para el reproductor, las ejecuciones y las capturas.
+
+    Se extraen `samples` fotogramas repartidos en el video como primeras imágenes para etiquetar (0 = solo el primero).
+    """
+    p = _project(db, user, project_id)
+    ext = PurePosixPath(file.filename or "").suffix.lower()
+    if ext not in imp.VIDEO_EXT:
+        raise HTTPException(422, "Formato no admitido (mp4, mov, m4v, avi, mkv o webm)")
+    if not 0 <= samples <= 200:
+        raise HTTPException(422, "samples debe estar entre 0 y 200")
+    try:
+        usage.check_quota(db, p)
+    except ValueError as e:
+        raise HTTPException(507, str(e)) from None
+    name = _uniq_video_name(db, p.id, imp.safe_name(PurePosixPath(file.filename or "video").stem))
+    vdir = (Path(settings.media_root) / "uploads" / p.slug / "videos").resolve()
+    vdir.mkdir(parents=True, exist_ok=True)
+    dest = vdir / f"{name}{ext}"
+    frames_dir = Path(settings.media_root) / name
+    frames_existed = frames_dir.exists()
+    try:
+        with open(dest, "wb") as out:
+            shutil.copyfileobj(file.file, out, 1024 * 1024)
+        try:
+            info = vid.video_info(str(dest))
+            pts = vid.video_pts(str(dest))
+        except Exception:
+            raise HTTPException(422, "El archivo no es un video legible") from None
+        if not pts:
+            raise HTTPException(422, "El video no tiene fotogramas")
+        v = Video(project_id=p.id, name=name, path=str(dest), meta={**info, "pts": pts, "origin": "carga"})
+        db.add(v)
+        db.flush()
+        n = len(pts)
+        picks = sorted({0, *(round(i * (n - 1) / max(1, samples)) for i in range(samples))}) if samples else [0]
+        pos = (db.scalar(select(func.max(Frame.position)).where(Frame.project_id == p.id)) or 0) + 1
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        made = 0
+        for idx in picks:
+            with _LOCK:
+                bgr = vid.extract_exact_frame(str(dest), pts, idx)
+            if bgr is None:
+                continue
+            h, w = bgr.shape[:2]
+            rel = f"{name}/f{idx:06d}.jpg"
+            cv2.imwrite(str(Path(settings.media_root) / rel), bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            db.add(
+                Frame(
+                    project_id=p.id,
+                    video_id=v.id,
+                    frame_index=idx,
+                    t=round(pts[idx], 3),
+                    image_path=rel,
+                    width=w,
+                    height=h,
+                    stratum="carga",
+                    position=pos,
+                    meta={"origin": "carga", "t_src": "pts"},
+                )
+            )
+            pos += 1
+            made += 1
+        if not made:
+            raise HTTPException(422, "No se pudo extraer ningún fotograma del video")
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                project_id=p.id,
+                action="import.video",
+                target=f"video:{v.id}",
+                detail={"name": name, "frames": made, "duration": info["dur"]},
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        dest.unlink(missing_ok=True)
+        if not frames_existed:
+            shutil.rmtree(frames_dir, ignore_errors=True)
+        raise
+    return {"video_id": v.id, "name": name, "frames": made, "duration": info["dur"], "fps": info["fps"]}

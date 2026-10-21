@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "../components/Icon";
+import ImportTab from "../components/ImportTab";
 import ModePicker from "../components/ModePicker";
 import { DetectorSelect } from "../components/Flows";
 import SshKeysModal from "../components/SshKeysModal";
@@ -11,10 +12,11 @@ const STATUS_LABEL: Record<Status, string> = {
   pending: "Nadie la revisó", single: "Revisada por 1 persona", agreed: "Varias, de acuerdo", disagreement: "Varias, en desacuerdo", final: "Final (decidió el revisor)",
 };
 
-type Tab = "quality" | "assign" | "datasets" | "train" | "assist" | "eval" | "workspace" | "team" | "config" | "system";
+type Tab = "quality" | "assign" | "import" | "datasets" | "train" | "assist" | "eval" | "workspace" | "team" | "config" | "system";
 const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: string; sub: (n: string) => string }[] = [
   { k: "quality", label: "Calidad", icon: "shield", title: "Calidad del etiquetado", hint: "Estado del etiquetado, acuerdo entre personas y trabajo de cada una", sub: (n) => `Resumen del estado del etiquetado, acuerdo entre anotadores y trabajo por persona en el proyecto ${n}.` },
   { k: "assign", label: "Asignaciones", icon: "users", title: "Asignaciones", hint: "Reparto de imágenes entre el equipo", sub: () => "Reparte imágenes pendientes y organiza el trabajo del equipo." },
+  { k: "import", label: "Cargar datos", icon: "upload", title: "Cargar imágenes y videos", hint: "Agregar imágenes (con o sin etiquetas) y videos al proyecto", sub: (n) => `Agrega material nuevo al proyecto ${n}.` },
   { k: "datasets", label: "Datasets", icon: "database", title: "Versiones del dataset", hint: "Versiones congeladas del dataset y su exportación", sub: () => "Instantáneas congeladas de las anotaciones y divisiones estables basadas en video." },
   { k: "train", label: "Entrenamiento", icon: "cpu", title: "Entrenamiento", hint: "Entrenar modelos en la GPU", sub: () => "Entrena un detector y compara sus resultados." },
   { k: "assist", label: "Asistido", icon: "sparkles", title: "Etiquetado asistido", hint: "Preanotar con un modelo y buscar las imágenes más inciertas", sub: () => "Usa el modelo para proponer cajas y priorizar imágenes." },
@@ -50,6 +52,7 @@ export default function AdminPage({ project, user, superuser, onBack, onProjects
           </div>
           {tab === "quality" && <Quality project={project} />}
           {tab === "assign" && <Assign project={project} isAdmin={isAdmin} />}
+          {tab === "import" && <ImportTab projectId={project.id} canImport={isAdmin || project.role === "reviewer"} />}
           {tab === "datasets" && <Datasets project={project} isAdmin={isAdmin} />}
           {tab === "train" && <Training project={project} onEvaluate={(id) => { setPreset(`model:${id}`); setTab("eval"); }} />}
           {tab === "assist" && <Assisted project={project} isAdmin={isAdmin} />}
