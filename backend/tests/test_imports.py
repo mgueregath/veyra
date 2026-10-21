@@ -167,7 +167,15 @@ def test_import_video_manual_creates_only_the_first_frame_then_snapshots(client,
     pts = adm.get(f"/api/videos/{d['video_id']}/pts").json()["pts"]
     r = adm.post(f"/api/frames/{d['first_frame_id']}/snapshot", json={"t": pts[40]})
     assert r.status_code == 200 and r.json()["existing"] is False
-    assert next(v for v in adm.get(f"/api/projects/{pid}/videos").json() if v["id"] == d["video_id"])["n_frames"] == 2
+    # el muestreo manual manda las capturas al final del carrusel, en el orden en que se toman
+    fid = d["first_frame_id"]
+    other = up(adm, pid, vfr_video.read_bytes(), mode="manual").json()  # otro video que queda después en el orden
+    a = adm.post(f"/api/frames/{other['first_frame_id']}/snapshot", json={"t": pts[60], "at_end": True}).json()
+    b = adm.post(f"/api/frames/{fid}/snapshot", json={"t": pts[20], "at_end": True}).json()
+    db.expire_all()
+    top = db.query(Frame).filter(Frame.project_id == pid).order_by(Frame.position.desc()).limit(2).all()
+    assert [f.id for f in top] == [b["id"], a["id"]] and top[0].position == top[1].position + 1
+    assert next(v for v in adm.get(f"/api/projects/{pid}/videos").json() if v["id"] == d["video_id"])["n_frames"] == 3
 
 
 def test_import_video_rejects_bad_input_and_cleans_up(client, world, db, vfr_video):

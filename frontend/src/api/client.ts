@@ -218,7 +218,7 @@ export const api = {
   videoInfo: (vid: number) => req<VideoInfo>(`/api/videos/${vid}/info`),
   videoPts: (vid: number, a: number, b: number) => req<{ pts: number[] }>(`/api/videos/${vid}/pts?a=${a}&b=${b}`),
   videoUrl: (vid: number) => `/api/videos/${vid}/stream`,
-  snapshot: (frameId: number, t: number) => req<SnapshotResult>(`/api/frames/${frameId}/snapshot`, { method: "POST", body: JSON.stringify({ t }) }),
+  snapshot: (frameId: number, t: number, atEnd = false) => req<SnapshotResult>(`/api/frames/${frameId}/snapshot`, { method: "POST", body: JSON.stringify({ t, at_end: atEnd }) }),
   thumbUrl: (id: number) => `/api/frames/${id}/thumb`,
   imageUrl: (id: number) => `/api/frames/${id}/image`,
 };

@@ -7,7 +7,7 @@ import cv2
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from .. import proposers, usage
@@ -116,6 +116,7 @@ def video_stream(
 
 class SnapshotIn(BaseModel):
     t: float
+    at_end: bool = False  # la imagen nueva va al final del proyecto (el muestreo manual); si no, junto a la de origen
 
 
 @router.post("/frames/{frame_id}/snapshot")
@@ -170,21 +171,24 @@ def snapshot(frame_id: int, body: SnapshotIn, user: User = Depends(current_user)
         "sharp": round(float(cv2.Laplacian(g, cv2.CV_64F).var()), 1),
         "bright": round(float(g.mean()), 1),
     }
-    # justo después de la foto de origen y de las instantáneas manuales que ya tuviera a continuación
-    pos = src.position + 1
-    nxt = db.scalars(
-        select(Frame).where(Frame.project_id == src.project_id, Frame.position >= pos).order_by(Frame.position)
-    ).all()
-    for f in nxt:
-        if f.video_id == v.id and f.stratum == "manual" and f.position == pos:
-            pos += 1
-        else:
-            break
-    db.execute(
-        update(Frame)
-        .where(Frame.project_id == src.project_id, Frame.position >= pos)
-        .values(position=Frame.position + 1)
-    )
+    if body.at_end:
+        pos = (db.scalar(select(func.max(Frame.position)).where(Frame.project_id == src.project_id)) or 0) + 1
+    else:
+        # justo después de la foto de origen y de las instantáneas manuales que ya tuviera a continuación
+        pos = src.position + 1
+        nxt = db.scalars(
+            select(Frame).where(Frame.project_id == src.project_id, Frame.position >= pos).order_by(Frame.position)
+        ).all()
+        for f in nxt:
+            if f.video_id == v.id and f.stratum == "manual" and f.position == pos:
+                pos += 1
+            else:
+                break
+        db.execute(
+            update(Frame)
+            .where(Frame.project_id == src.project_id, Frame.position >= pos)
+            .values(position=Frame.position + 1)
+        )
     fr = Frame(
         project_id=src.project_id,
         video_id=v.id,

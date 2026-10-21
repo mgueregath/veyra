@@ -127,7 +127,7 @@ export default function SamplePage({ project, user, videoId, onBack, onProjects,
     v.currentTime = at + 0.0005;
     setBusy(true); setMsg(null);
     try {
-      const r = await api.snapshot(video.first_frame_id, at);
+      const r = await api.snapshot(video.first_frame_id, at, true);
       let extra = "";
       if (assisted && pre && !r.existing) {
         try { const a = await api.refreshAssisted(r.id); extra = ` Detector asistido: ${a.proposals.length} cajas.`; }
@@ -135,7 +135,7 @@ export default function SamplePage({ project, user, videoId, onBack, onProjects,
       }
       setTaken((a) => (a.some((x) => x.id === r.id) ? a : [{ id: r.id, t: at, existing: r.existing }, ...a]));
       await openFrame(r.id);
-      setMsg({ t: (r.existing ? `El fotograma de ${clock(at)} ya era una imagen del proyecto.` : r.restored ? `Fotograma de ${clock(at)} recuperado de la papelera.` : `Instantánea de ${clock(at)} guardada.`) + extra + " Etiquétala aquí y pulsa reproducir para seguir.", ok: true });
+      setMsg({ t: (r.existing ? `El fotograma de ${clock(at)} ya era una imagen del proyecto.` : r.restored ? `Fotograma de ${clock(at)} recuperado de la papelera.` : `Instantánea de ${clock(at)} guardada al final del carrusel (imagen #${r.position + 1}).`) + extra + " Etiquétala aquí y pulsa reproducir para seguir.", ok: true });
       for (const k of ["frames", "stats", "projects", "videos"]) void qc.invalidateQueries({ queryKey: [k] });
     } catch (e) { setMsg({ t: (e as Error).message, ok: false }); }
     finally { setBusy(false); }
