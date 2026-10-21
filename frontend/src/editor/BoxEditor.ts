@@ -64,6 +64,7 @@ export class BoxEditor {
   /** Cajas de solo lectura de otra persona (el revisor las compara con las suyas). */
   overlay: { boxes: { bbox: Box; label: string | null }[]; title: string } | null = null;
   private rev = 0;
+  private pendingImg: HTMLImageElement | null = null;
   private fitted = true;
   private drag: Drag | null = null;
   private undoUntil = 0;
@@ -131,15 +132,22 @@ export class BoxEditor {
   }
 
   // ---------- datos ----------
-  setFrame(doc: M.EditDoc, imageUrl: string) {
+  /** `keepView`: la imagen nueva tiene el mismo tamaño (otro fotograma del mismo video): se conserva el zoom y el desplazamiento. */
+  setFrame(doc: M.EditDoc, imageUrl: string, keepView = false) {
     this.doc = doc;
     this.sel = -1;
     this.hov = -1;
     this.undoBox = null;
     this.rev++;
     const img = new Image();
-    this.img = img;
-    img.onload = () => { if (this.img === img) { this.fit(false); this.draw(); } };
+    if (!keepView || !this.img) this.img = img; // con keepView la imagen anterior sigue a la vista hasta que cargue la nueva (sin parpadeo)
+    this.pendingImg = img;
+    img.onload = () => {
+      if (this.pendingImg !== img) return;
+      this.img = img;
+      if (!keepView) this.fit(false);
+      this.draw();
+    };
     img.src = imageUrl;
     this.draw();
   }

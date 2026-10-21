@@ -139,9 +139,9 @@ describe("applyRefresh", () => {
   const box = (o: Partial<EBox>): EBox => ({ bbox: [0, 0, 10, 10], label: null, manual: false, sources: ["model", "model:1"], score: 0.5, proposal_id: 1, orig_bbox: null, ...o });
   it("reemplaza las cajas del detector sin tocar y conserva lo trabajado", () => {
     const d = { reviewed: false, deleted: [], boxes: [box({}), box({ bbox: [50, 50, 10, 10], label: "louse" }), box({ bbox: [90, 90, 5, 5], manual: true, sources: ["manual"] }), box({ bbox: [30, 30, 8, 8], sources: ["motion"] })] };
-    const r = applyRefresh(d, "model:1", [{ id: 9, bbox: [51, 50, 10, 10], sources: ["model", "model:1"], score: 0.7 }, { id: 10, bbox: [70, 10, 10, 10], sources: ["model", "model:1"], score: 0.6 }]);
-    expect(r).toEqual({ removed: 1, added: 1 });
-    expect(d.boxes.map((b) => b.proposal_id)).toEqual([1, 1, 1, 10]);
+    const r = applyRefresh(d, [{ id: 9, bbox: [51, 50, 10, 10], sources: ["model", "model:1"], score: 0.7 }, { id: 10, bbox: [70, 10, 10, 10], sources: ["model", "model:1"], score: 0.6 }]);
+    expect(r).toEqual({ removed: 2, added: 1 });
+    expect(d.boxes.map((b) => b.proposal_id)).toEqual([1, 1, 10]); // la de otra fuente (movimiento) sin tocar también se reemplaza
     expect(d.boxes.filter((b) => b.label === "louse")).toHaveLength(1);
   });
 });

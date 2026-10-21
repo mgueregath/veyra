@@ -6,6 +6,7 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
 from . import consensus, flows
+from .combine import combine_or
 from .config import settings
 from .db import SessionLocal
 from .evaluation import Pred
@@ -25,6 +26,11 @@ def frames_in_scope(db: Session, project: Project, scope: str, frame_ids: list[i
             ~exists().where(Review.frame_id == Frame.id),
         )
     return list(db.scalars(q))
+
+
+def dedupe(preds: list[Pred]) -> list[Pred]:
+    """Funde las cajas casi idénticas de una misma detección (el mismo objeto propuesto dos veces)."""
+    return combine_or([preds], thr=0.5)
 
 
 def flow_predictions(db: Session, project: Project, spec: dict, frame_ids: list[int]) -> dict[int, list[Pred]]:
@@ -74,7 +80,7 @@ def execute_preannotation(run_id: int, cancelled: set[int]) -> None:
                 )
                 db.execute(delete(Proposal).where(Proposal.frame_id.in_(batch), Proposal.sources.contains([tag])))
                 for fid, plist in preds.items():
-                    for p in plist:
+                    for p in dedupe(plist):
                         if flow_id or p.score >= prm["min_score"]:  # en un flujo, el mínimo lo pone cada fuente
                             x, y, w, h = p.bbox
                             db.add(
@@ -168,7 +174,7 @@ def default_detector(project: Project) -> tuple[str, int]:
 
 
 def refresh_frame(db: Session, project: Project, frame_id: int, min_score: float = 0.15) -> tuple[str, list[Proposal]]:
-    """Vuelve a correr el detector asistido sobre UNA imagen y reemplaza sus propuestas de ese detector."""
+    """Vuelve a correr el detector asistido sobre UNA imagen y reemplaza sus propuestas automáticas."""
     kind, did = default_detector(project)
     tag = f"{kind}:{did}"
     if kind == "flow":
@@ -178,9 +184,11 @@ def refresh_frame(db: Session, project: Project, frame_id: int, min_score: float
         preds = flow_predictions(db, project, f.spec, [frame_id])
     else:
         preds = model_predictions(db, project, did, [frame_id])
-    db.execute(delete(Proposal).where(Proposal.frame_id == frame_id, Proposal.sources.contains([tag])))
+    # refrescar = el detector asistido manda: se descartan TODAS las propuestas automáticas de la imagen (también las de
+    # otras fuentes, p. ej. el detector de apariencia de la captura), si no las mismas cajas quedan superpuestas
+    db.execute(delete(Proposal).where(Proposal.frame_id == frame_id))
     new = []
-    for p in preds.get(frame_id, []):
+    for p in dedupe(preds.get(frame_id, [])):
         if kind == "flow" or p.score >= min_score:
             x, y, w, h = p.bbox
             new.append(

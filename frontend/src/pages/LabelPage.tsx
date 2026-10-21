@@ -253,7 +253,7 @@ export default function LabelPage({ project, user, onExit, onLogout, onAdmin, on
     try {
       const r = await api.refreshAssisted(id);
       if (curRef.current !== id || ed.doc == null) return;
-      const { removed, added } = applyRefresh(ed.doc, r.tag, r.proposals);
+      const { removed, added } = applyRefresh(ed.doc, r.proposals);
       docs.current.set(id, ed.doc);
       ed.replaceDoc(ed.doc);
       if (detail?.annotation && (removed || added)) { saver.queue(id, docToAnnotation(ed.doc)); patchItem(id, ed.doc); } // sin anotación guardada, las propuestas siguen siendo solo una vista

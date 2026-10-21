@@ -75,17 +75,18 @@ const iouOf = (a: Box, b: Box) => {
 };
 
 /**
- * Refresca el etiquetado asistido: quita las cajas del detector (`tag`) que aún no se etiquetaron ni tocaron y agrega las nuevas.
- * Lo que la persona ya hizo (etiquetadas, movidas, manuales, de otras fuentes) se conserva; una propuesta nueva que coincide
- * con una caja ya trabajada (etiquetada, movida, manual o borrada) no se duplica. Devuelve cuántas se quitaron y cuántas se agregaron.
+ * Refresca el etiquetado asistido: quita TODAS las cajas automáticas que aún no se etiquetaron ni tocaron (sean de la fuente que
+ * sean, para no dejarlas superpuestas con las nuevas) y agrega las nuevas. Lo que la persona ya hizo (etiquetadas, movidas,
+ * manuales) se conserva; una propuesta nueva que coincide con una caja ya trabajada (o borrada) no se duplica.
+ * Devuelve cuántas se quitaron y cuántas se agregaron.
  */
-export function applyRefresh(d: EditDoc, tag: string, proposals: { id: number; bbox: Box; sources: string[]; score: number | null }[]) {
+export function applyRefresh(d: EditDoc, proposals: { id: number; bbox: Box; sources: string[]; score: number | null }[]) {
   const before = d.boxes.length;
-  d.boxes = d.boxes.filter((b) => b.manual || b.label !== null || b.orig_bbox !== null || !b.sources.includes(tag));
+  d.boxes = d.boxes.filter((b) => b.manual || b.label !== null || b.orig_bbox !== null);
   const removed = before - d.boxes.length;
   let added = 0;
   for (const p of proposals) {
-    if (d.boxes.some((b) => (b.manual || b.label !== null || b.orig_bbox !== null) && iouOf(b.bbox, p.bbox as Box) >= 0.5) || d.deleted.some((b) => iouOf(b.bbox, p.bbox as Box) >= 0.5)) continue;
+    if (d.boxes.some((b) => iouOf(b.bbox, p.bbox as Box) >= 0.5) || d.deleted.some((b) => iouOf(b.bbox, p.bbox as Box) >= 0.5)) continue;
     d.boxes.push({ bbox: [...p.bbox] as Box, label: null, manual: false, sources: [...p.sources], score: p.score, proposal_id: p.id, orig_bbox: null });
     added++;
   }

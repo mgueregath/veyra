@@ -304,3 +304,13 @@ progress::-webkit-progress-bar{background:#ded5dc;border-radius:7px}progress::-w
 .qlstage{position:relative;height:min(52vh,460px);background:#1d1a20;border-radius:10px;overflow:hidden;margin-top:8px}.qlstage canvas{width:100%;height:100%;display:block}
 .smthumb{cursor:pointer}.smthumb.on img{outline:3px solid var(--accent,#6b3f8f)}
 .sampling-progress progress{width:100%}
+.samplepage{display:flex;flex-direction:column;height:100vh}
+.smbar{flex:none}
+.smmain{flex:1;min-height:0;display:flex;gap:0}
+.smstage{position:relative;flex:1;min-width:0;background:#1d1a20}.smstage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.smhidden{position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+.smside{width:210px;flex:none;background:#fff;border-left:1px solid var(--line);padding:14px;overflow:auto}.smside h3{margin:0 0 8px;font-size:15px}
+.smthumbs{display:flex;flex-direction:column;gap:10px}
+.smtransport{flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fff;border-top:1px solid var(--line);flex-wrap:wrap}
+.smtransport input[type=range]{flex:1;min-width:160px}
+.smmsg{flex:none;margin:0;padding:6px 16px;font-size:14px;background:#fff}

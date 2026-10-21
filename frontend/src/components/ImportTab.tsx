@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, type Project, type ImportImagesResult, type ImportVideoResult, type ProjectVideo, type SamplePlan } from "../api/client";
-import { AutoSampler, ManualSampler, SamplingProgress } from "./VideoSampler";
+import { api, type Project, type ImportImagesResult, type ImportVideoResult, type SamplePlan } from "../api/client";
+import { AutoSampler, SamplingProgress } from "./VideoSampler";
 import Icon from "./Icon";
 
 const VIDEO_OK = /\.(mp4|mov|m4v|avi|mkv|webm)$/i;
@@ -38,7 +38,7 @@ export default function ImportTab({ project, canImport }: { project: Project; ca
   const [interval, setInterval_] = useState(5);
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState("");
-  const [manualFor, setManualFor] = useState<ProjectVideo | null>(null);
+  const openManual = (videoId: number) => { window.location.hash = `p=${projectId}&v=sample&vid=${videoId}`; };
   const [autoFor, setAutoFor] = useState<number | null>(null);
   const [runs, setRuns] = useState<{ id: number; label: string }[]>([]);
   const videos = useQuery({ queryKey: ["videos", projectId], queryFn: () => api.projectVideos(projectId) });
@@ -124,10 +124,9 @@ export default function ImportTab({ project, canImport }: { project: Project; ca
         {vidRes.map((r) => "error" in r
           ? <p key={r.name} className="err">{r.name}: {r.error}</p>
           : <div key={r.video_id} className="importnote"><b>{r.name}</b>: {r.mode === "manual" ? "subido" : `${r.planned} imágenes planificadas`} · {Math.round(r.duration)} s a {r.fps.toFixed(1)} fps.
-            {r.mode === "manual" && <button className="btn" onClick={() => setManualFor({ id: r.video_id, name: r.name, has_file: true, n_frames: r.frames, first_frame_id: r.first_frame_id, duration: r.duration })}>Abrir muestreo manual</button>}</div>)}
+            {r.mode === "manual" && <button className="btn" onClick={() => openManual(r.video_id)}>Abrir muestreo manual</button>}</div>)}
       </div>
       {runs.map((r) => <SamplingProgress key={r.id} runId={r.id} label={r.label} />)}
-      {manualFor && <ManualSampler key={manualFor.id} project={project} video={manualFor} onClose={() => setManualFor(null)} />}
       <div className="panel" id="import-existing">
         <h2>Videos del proyecto</h2>
         <p className="mut">Toma más imágenes de un video ya cargado, de forma automática o manual.</p>
@@ -137,7 +136,7 @@ export default function ImportTab({ project, canImport }: { project: Project; ca
             <tr key={v.id}><td>{v.name}</td><td>{v.n_frames}</td><td>{v.duration ? `${Math.round(v.duration)} s` : "—"}</td>
               <td>{v.has_file ? <>
                 <button className="btn imp-auto" onClick={() => setAutoFor(autoFor === v.id ? null : v.id)}>Muestreo automático</button>{" "}
-                <button className="btn imp-manual" disabled={v.first_frame_id === null} onClick={() => setManualFor(v)}>Muestreo manual</button>
+                <button className="btn imp-manual" disabled={v.first_frame_id === null} onClick={() => openManual(v.id)}>Muestreo manual</button>
                 {autoFor === v.id && <AutoSampler video={v} onDone={() => undefined} onRun={(id) => setRuns((a) => [...a, { id, label: v.name }])} />}
               </> : <span className="mut">sin archivo original</span>}</td></tr>
           ))}</tbody>

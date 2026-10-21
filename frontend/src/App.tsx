@@ -4,6 +4,7 @@ import { api, type Project } from "./api/client";
 import AdminPage from "./pages/AdminPage";
 import ModelsPage from "./pages/ModelsPage";
 import RunPage from "./pages/RunPage";
+import SamplePage from "./pages/SamplePage";
 import LabelPage from "./pages/LabelPage";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
@@ -13,10 +14,14 @@ const hashProject = () => {
   const m = /(?:^|[#&])p=(\d+)/.exec(window.location.hash);
   return m ? Number(m[1]) : null;
 };
-type View = "label" | "admin" | "models" | "run";
+type View = "label" | "admin" | "models" | "run" | "sample";
 const hashView = (): View => {
-  const m = /(?:^|[#&])v=(admin|models|run)/.exec(window.location.hash);
+  const m = /(?:^|[#&])v=(admin|models|run|sample)/.exec(window.location.hash);
   return m ? (m[1] as View) : "label";
+};
+const hashVideo = () => {
+  const m = /(?:^|[#&])vid=(\d+)/.exec(window.location.hash);
+  return m ? Number(m[1]) : null;
 };
 const hashModel = () => {
   const m = /(?:^|[#&])m=(\d+)/.exec(window.location.hash);
@@ -30,8 +35,9 @@ export default function App() {
   const [pid, setPid] = useState<number | null>(hashProject);
   const [view, setView] = useState(hashView);
   const [mid, setMid] = useState(hashModel);
+  const [vid, setVid] = useState(hashVideo);
   useEffect(() => {
-    const on = () => { setPid(hashProject()); setView(hashView()); setMid(hashModel()); };
+    const on = () => { setPid(hashProject()); setView(hashView()); setMid(hashModel()); setVid(hashVideo()); };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
@@ -53,6 +59,7 @@ export default function App() {
   if (pid !== null && projects.isLoading) return <div className="center">Cargando…</div>;
   if (project && view === "models") return <ModelsPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onRun={(m) => open(project, "run", m)} onLogout={logout} />;
   if (project && view === "run" && mid !== null) return <RunPage key={`${project.id}-${mid}`} project={project} user={who} modelId={mid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} onPickModel={(m) => open(project, "run", m)} onLogout={logout} />;
+  if (project && view === "sample" && vid !== null) return <SamplePage key={`${project.id}-${vid}`} project={project} user={who} videoId={vid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} onLogout={logout} />;
   if (project && view === "admin") return <AdminPage key={project.id} project={project} user={who} superuser={!!me.data.is_superuser} onBack={() => open(project)} onProjects={() => open(null)} onModels={() => open(project, "models")} onLogout={logout} />;
   if (project) return <LabelPage key={project.id} project={project} user={who} onExit={() => open(null)} onLogout={logout} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} />;
   return <Projects user={who} onOpen={(p, v) => open(p, v ?? "label")} onLogout={logout} />;

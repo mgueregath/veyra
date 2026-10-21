@@ -134,6 +134,8 @@ def test_refresh_assisted_labeling_of_one_frame(client, world, db, fake_workers)
     assert next(x for x in admin.get("/api/projects").json() if x["id"] == pid)["config"]["assisted"] == {
         "model_id": mid
     }
+    db.add(Proposal(frame_id=fid, x=10, y=10, w=20, h=20, sources=["blob"], score=5.0))  # la que dejó la captura
+    db.commit()
     for _ in range(2):  # repetir reemplaza, no acumula
         r = admin.post(f"/api/frames/{fid}/assisted")
         assert r.status_code == 200, r.text
@@ -141,4 +143,20 @@ def test_refresh_assisted_labeling_of_one_frame(client, world, db, fake_workers)
     db.expire_all()
     mine = [p for p in db.query(Proposal).filter(Proposal.frame_id == fid) if f"model:{mid}" in p.sources]
     assert len(mine) == len(r.json()["proposals"])
+    allp = db.query(Proposal).filter(Proposal.frame_id == fid).all()
+    assert len(allp) == len(mine) and not any("blob" in p.sources for p in allp)  # nada superpuesto de otra fuente
     assert admin.put(f"/api/projects/{pid}/assisted", json={}).json() == {"assisted": None}
+
+
+def test_dedupe_merges_the_same_object_proposed_twice():
+    from app.assisted import dedupe
+    from app.evaluation import Pred
+
+    out = dedupe(
+        [
+            Pred((54, 1286, 80, 80), "louse", 0.9),
+            Pred((54, 1288, 80, 80), "louse", 0.7),
+            Pred((300, 10, 20, 20), "louse", 0.5),
+        ]
+    )
+    assert len(out) == 2 and out[0].score == 0.9

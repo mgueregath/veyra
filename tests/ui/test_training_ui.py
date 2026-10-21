@@ -137,9 +137,8 @@ try:
     check("«Refrescar asistido» sin detector elegido avisa dónde definirlo", wait_for(c, "document.body.textContent.includes('Gestión → Asistido')", 10))
     c.eval("fetch('/api/projects/%d/assisted',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({flow_id:%d})})" % (PID, fl[0]["id"])); time.sleep(1)
     c.eval("(()=>{const d=window.__lh.editor.doc;d.boxes=d.boxes.filter(b=>!b.sources.some(s=>s.startsWith('flow:')));})()")  # simula que no hay cajas del flujo
-    n0 = c.eval("window.__lh.editor.doc.boxes.length")
     c.eval("document.getElementById('refresh-assisted').click()")
-    check("«Refrescar asistido» vuelve a proponer las cajas del detector elegido sobre la imagen actual", wait_for(c, f"window.__lh.editor.doc.boxes.length>{n0}&&window.__lh.editor.doc.boxes.some(b=>b.sources.some(s=>s.startsWith('flow:')))&&!document.getElementById('refresh-assisted').disabled", 40), c.eval("window.__lh.editor.doc.boxes.length"))
+    check("«Refrescar asistido» deja solo las cajas del detector elegido sobre la imagen actual (sin superposición de otras fuentes)", wait_for(c, "!document.getElementById('refresh-assisted').disabled&&window.__lh.editor.doc.boxes.length>0&&window.__lh.editor.doc.boxes.every(b=>b.manual||b.label!==null||b.sources.some(s=>s.startsWith('flow:')))", 40), c.eval("JSON.stringify(window.__lh.editor.doc.boxes.map(b=>b.sources))"))
     # cargar imágenes con etiquetas desde Gestión → Cargar datos
     import base64
 
@@ -177,15 +176,20 @@ try:
     c.eval("document.getElementById('imp-vsend').click()")
     check("video manual: se sube con una sola imagen y ofrece abrir el muestreo", wait_for(c, "[...document.querySelectorAll('#import-videos .importnote')].some(n=>n.textContent.includes('manual')&&n.textContent.includes('subido'))", 40))
     c.eval("[...document.querySelectorAll('#import-videos .importnote button')].find(b=>b.textContent.includes('Abrir muestreo manual')).click()")
-    check("se abre el reproductor y cargan los fotogramas del video", wait_for(c, "!!document.getElementById('sm-video')&&document.getElementById('sm-time').textContent.includes('de 1')", 20), c.eval("document.getElementById('sm-time')?.textContent"))
-    c.eval("(()=>{const v=document.getElementById('sm-video');v.currentTime=2.0})()"); time.sleep(1)
+    check("el muestreo manual abre una pantalla propia con el video y los fotogramas", wait_for(c, "location.hash.includes('v=sample')&&!!document.getElementById('sm-video')&&document.getElementById('sm-time').textContent.includes('de 1')", 25), c.eval("location.hash+' '+document.getElementById('sm-time')?.textContent"))
+    check("la pantalla muestra el lienzo único (video) y no el editor separado", c.eval("document.getElementById('sm-mode').textContent.trim()")=="Video" and c.eval("!document.getElementById('quicklabel')"))
+    c.eval("(()=>{const v=document.getElementById('sm-video');v.currentTime=2.0})()"); time.sleep(1.2)
     c.eval("document.getElementById('sm-take').click()")
-    check("«Tomar instantánea» guarda el fotograma, corre el detector asistido y lo abre para etiquetar", wait_for(c, "document.getElementById('sm-msg')?.textContent.includes('Instantánea de')&&document.getElementById('sm-msg').textContent.includes('Detector asistido')&&!!document.getElementById('ql-cv')&&!!document.getElementById('sm-taken')", 30), c.eval("document.getElementById('sm-msg')?.textContent"))
-    check("junto al video aparecen las clases para etiquetar", c.eval("!!document.getElementById('ql-cls-louse')&&!!document.getElementById('ql-reviewed')"))
-    new_id = int(c.eval("document.querySelector('#sm-taken img').src.match(/frames\\/(\\d+)\\/thumb/)[1]"))
+    check("«Tomar instantánea» deja el video en pausa con la imagen encima y corre el detector asistido", wait_for(c, "document.getElementById('sm-msg')?.textContent.includes('Instantánea de')&&document.getElementById('sm-msg').textContent.includes('Detector asistido')&&document.getElementById('sm-mode').textContent.includes('Instantánea')&&document.getElementById('sm-video').paused", 30), c.eval("document.getElementById('sm-msg')?.textContent"))
+    new_id = int(c.eval("document.querySelector('.smthumb img').src.match(/frames\\/(\\d+)\\/thumb/)[1]"))
+    props = root.get(f"/api/frames/{new_id}")["proposals"]
+    check("el preetiquetado no deja cajas superpuestas del mismo objeto", len(props) == len({tuple(p["bbox"]) for p in props}) and not any("blob" in p["sources"] for p in props), props)
     time.sleep(1)
-    c.eval("document.getElementById('ql-reviewed').click()")
-    check("etiquetar en el momento: marcarla revisada la guarda en el servidor", wait_for(c, "true") and any((root.get(f"/api/frames/{new_id}").get("annotation") or {}).get("reviewed") for _ in [time.sleep(1.5)]), root.get(f"/api/frames/{new_id}").get("annotation"))
+    c.eval("document.getElementById('sm-reviewed').click()")
+    check("etiquetar en el mismo lugar: marcarla revisada la guarda en el servidor", any((root.get(f"/api/frames/{new_id}").get("annotation") or {}).get("reviewed") for _ in [time.sleep(1.5)]))
+    c.eval("document.getElementById('sm-play').click()")
+    check("al reproducir se vuelve al video desde ese instante", wait_for(c, "document.getElementById('sm-mode').textContent.trim()==='Video'&&document.getElementById('sm-time').textContent.startsWith('0:02')", 10), c.eval("document.getElementById('sm-time').textContent"))
+    c.eval("document.getElementById('sm-play').click()")
     vids_now = {v["name"]: v for v in root.get(f"/api/projects/{PID}/videos")}
     check("el video manual quedó con 2 imágenes (la primera y la instantánea)", vids_now["manual"]["n_frames"] == 2 and vids_now["auto"]["n_frames"] == 3, {k: v["n_frames"] for k, v in vids_now.items()})
     print("\nRESUMEN: %d/%d OK" % (sum(res.values()), len(res)))
