@@ -5,6 +5,7 @@ import AdminPage from "./pages/AdminPage";
 import ModelsPage from "./pages/ModelsPage";
 import RunPage from "./pages/RunPage";
 import SamplePage from "./pages/SamplePage";
+import UploadDock from "./components/UploadDock";
 import LabelPage from "./pages/LabelPage";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
@@ -28,7 +29,7 @@ const hashModel = () => {
   return m ? Number(m[1]) : null;
 };
 
-export default function App() {
+function AppInner() {
   const qc = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects, enabled: !!me.data });
@@ -59,8 +60,17 @@ export default function App() {
   if (pid !== null && projects.isLoading) return <div className="center">Cargando…</div>;
   if (project && view === "models") return <ModelsPage key={project.id} project={project} user={who} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onRun={(m) => open(project, "run", m)} onLogout={logout} />;
   if (project && view === "run" && mid !== null) return <RunPage key={`${project.id}-${mid}`} project={project} user={who} modelId={mid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} onPickModel={(m) => open(project, "run", m)} onLogout={logout} />;
-  if (project && view === "sample" && vid !== null) return <SamplePage key={`${project.id}-${vid}`} project={project} user={who} videoId={vid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} onLogout={logout} />;
+  if (project && view === "sample" && vid !== null) return <SamplePage key={`${project.id}-${vid}`} project={project} user={who} videoId={vid} onBack={() => open(project)} onProjects={() => open(null)} onAdmin={() => { window.location.hash = `p=${project.id}&v=admin&t=files`; }} onModels={() => open(project, "models")} onLogout={logout} />;
   if (project && view === "admin") return <AdminPage key={project.id} project={project} user={who} superuser={!!me.data.is_superuser} onBack={() => open(project)} onProjects={() => open(null)} onModels={() => open(project, "models")} onLogout={logout} />;
   if (project) return <LabelPage key={project.id} project={project} user={who} onExit={() => open(null)} onLogout={logout} onAdmin={() => open(project, "admin")} onModels={() => open(project, "models")} />;
   return <Projects user={who} onOpen={(p, v) => open(p, v ?? "label")} onLogout={logout} />;
+}
+
+export default function App() {
+  return (
+    <>
+      <AppInner />
+      <UploadDock />
+    </>
+  );
 }

@@ -314,3 +314,21 @@ progress::-webkit-progress-bar{background:#ded5dc;border-radius:7px}progress::-w
 .smtransport{flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fff;border-top:1px solid var(--line);flex-wrap:wrap}
 .smtransport input[type=range]{flex:1;min-width:160px}
 .smmsg{flex:none;margin:0;padding:6px 16px;font-size:14px;background:#fff}
+
+/* archivos fuente */
+.srchead{justify-content:space-between;align-items:center;margin-bottom:14px}
+#sources .panel + .panel{margin-top:18px}
+.srcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:10px}
+.srcitem{margin:0;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.srcitem img{width:100%;aspect-ratio:4/3;object-fit:cover;background:#eee}
+.srcitem figcaption{padding:6px 8px;display:flex;flex-direction:column;gap:2px;font-size:12px;min-width:0}.srcitem figcaption b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.srcitem small{color:var(--muted)}
+.uploadbox{width:min(720px,94vw)!important;max-height:90vh;overflow:auto}
+.uploadbox .htabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.uploadbox .htabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;min-height:40px;padding:0 14px;font-weight:600;color:var(--muted)}
+.uploadbox .htabs button.on{color:var(--fg,#241c26);border-bottom-color:var(--accent,#6b3f8f)}
+/* subidas en curso */
+.udock{position:fixed;right:16px;bottom:16px;width:min(340px,92vw);max-height:60vh;overflow:auto;z-index:120;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #1a2b4a2e;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.udock-head{display:flex;justify-content:space-between;align-items:center}.udock-btn{border:0;background:none;font-size:18px;min-height:0;padding:0 6px;cursor:pointer}
+.udock-item{position:relative;display:flex;flex-direction:column;gap:3px;padding:8px 22px 8px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+.udock-item progress{width:100%}.udock-label{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.udock-item .ok{color:#2f7d4f}.udock-item .warn{color:#98651a}.udock-x{position:absolute;right:4px;top:2px;border:0;background:none;font-size:16px;cursor:pointer;min-height:0}

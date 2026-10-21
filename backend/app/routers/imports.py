@@ -1,6 +1,7 @@
 import bisect
 import datetime as dt
 import io
+import os
 import shutil
 import threading
 import zipfile
@@ -425,3 +426,105 @@ def sample_video(video_id: int, body: SampleIn, user: User = Depends(current_use
     db.commit()
     run = _start_sampling(db, p, v, path, todo, user, "automático") if todo else None
     return {"video_id": v.id, "run_id": run.id if run else None, "frames": len(todo), "already": len(idxs) - len(todo)}
+
+
+def _member(db: Session, user: User, pid: int) -> Project:
+    p = db.get(Project, pid)
+    if not p or not role_in(db, user, pid):
+        raise HTTPException(404, "Proyecto no encontrado")
+    return p
+
+
+def _size(path: str | Path) -> int | None:
+    try:
+        return os.stat(path).st_size
+    except OSError:
+        return None
+
+
+@router.get("/projects/{project_id}/sources/videos")
+def source_videos(project_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Videos del proyecto con archivo original: de ellos salen las imágenes por muestreo."""
+    p = _member(db, user, project_id)
+    counts = dict(
+        db.execute(
+            select(Frame.video_id, func.count(Frame.id))
+            .where(Frame.project_id == p.id, Frame.deleted_at.is_(None))
+            .group_by(Frame.video_id)
+        ).all()
+    )
+    firsts = dict(
+        db.execute(
+            select(Frame.video_id, func.min(Frame.id)).where(Frame.project_id == p.id).group_by(Frame.video_id)
+        ).all()
+    )
+    out = []
+    for v in db.scalars(select(Video).where(Video.project_id == p.id, Video.path.is_not(None)).order_by(Video.name)):
+        m = v.meta or {}
+        out.append(
+            {
+                "id": v.id,
+                "name": v.name,
+                "has_file": os.path.isfile(v.path),
+                "bytes": _size(v.path),
+                "duration": m.get("dur"),
+                "fps": m.get("fps"),
+                "n_frames": counts.get(v.id, 0),
+                "first_frame_id": firsts.get(v.id),
+                "origin": "carga" if m.get("origin") == "carga" else "importado",
+            }
+        )
+    return out
+
+
+@router.get("/projects/{project_id}/sources/images")
+def source_images(
+    project_id: int,
+    offset: int = 0,
+    limit: int = 60,
+    batch: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Imágenes que no salen de un video con archivo: cargadas, capturas en vivo o de videos sin original."""
+    p = _member(db, user, project_id)
+    limit = max(1, min(limit, 200))
+    base = (
+        select(Frame, Video)
+        .join(Video, Video.id == Frame.video_id)
+        .where(Frame.project_id == p.id, Frame.deleted_at.is_(None), Video.path.is_(None))
+    )
+    batches = db.execute(
+        select(Video.name, func.count(Frame.id), Video.meta)
+        .join(Frame, Frame.video_id == Video.id)
+        .where(Frame.project_id == p.id, Frame.deleted_at.is_(None), Video.path.is_(None))
+        .group_by(Video.id)
+        .order_by(Video.id.desc())
+    ).all()
+
+    def kind(meta: dict | None, name: str) -> str:
+        m = meta or {}
+        return "en vivo" if "live_session" in m else "carga" if m.get("origin") == "carga" else "sin video original"
+
+    q = base.where(Video.name == batch) if batch else base
+    total = db.scalar(select(func.count()).select_from(q.subquery()))
+    media = Path(settings.media_root)
+    items = []
+    for f, v in db.execute(q.order_by(Frame.position).offset(max(0, offset)).limit(limit)).all():
+        items.append(
+            {
+                "id": f.id,
+                "name": (f.meta or {}).get("original_name") or Path(f.image_path).name,
+                "batch": v.name,
+                "origin": kind(v.meta, v.name),
+                "width": f.width,
+                "height": f.height,
+                "bytes": _size(media / f.image_path),
+                "position": f.position,
+            }
+        )
+    return {
+        "total": total,
+        "batches": [{"name": n, "count": c, "origin": kind(m, n)} for n, c, m in batches],
+        "items": items,
+    }

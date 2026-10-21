@@ -106,6 +106,10 @@ function upload<T>(path: string, fd: FormData, onProgress: (frac: number) => voi
   });
 }
 
+export interface SourceVideo { id: number; name: string; has_file: boolean; bytes: number | null; duration: number | null; fps: number | null; n_frames: number; first_frame_id: number | null; origin: "carga" | "importado" }
+export interface SourceImage { id: number; name: string; batch: string; origin: string; width: number; height: number; bytes: number | null; position: number }
+export interface SourceImages { total: number; batches: { name: string; count: number; origin: string }[]; items: SourceImage[] }
+
 export const api = {
   me: () => req<Me>("/api/me"),
   login: (username: string, password: string) => req<Me>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
@@ -188,6 +192,8 @@ export const api = {
     if (plan.end !== null) fd.append("end", String(plan.end));
     return upload<ImportVideoResult>(`/api/projects/${pid}/import/video`, fd, onProgress);
   },
+  sourceVideos: (pid: number) => req<SourceVideo[]>(`/api/projects/${pid}/sources/videos`),
+  sourceImages: (pid: number, offset: number, limit: number, batch?: string) => req<SourceImages>(`/api/projects/${pid}/sources/images?offset=${offset}&limit=${limit}${batch ? `&batch=${encodeURIComponent(batch)}` : ""}`),
   flows: (pid: number) => req<Flow[]>(`/api/projects/${pid}/flows`),
   createFlow: (pid: number, body: { name: string; spec: FlowNode }) => req<Flow>(`/api/projects/${pid}/flows`, { method: "POST", body: JSON.stringify(body) }),
   updateFlow: (pid: number, id: number, body: { name: string; spec: FlowNode }) => req<Flow>(`/api/projects/${pid}/flows/${id}`, { method: "PUT", body: JSON.stringify(body) }),

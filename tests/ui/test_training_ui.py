@@ -139,22 +139,27 @@ try:
     c.eval("(()=>{const d=window.__lh.editor.doc;d.boxes=d.boxes.filter(b=>!b.sources.some(s=>s.startsWith('flow:')));})()")  # simula que no hay cajas del flujo
     c.eval("document.getElementById('refresh-assisted').click()")
     check("«Refrescar asistido» deja solo las cajas del detector elegido sobre la imagen actual (sin superposición de otras fuentes)", wait_for(c, "!document.getElementById('refresh-assisted').disabled&&window.__lh.editor.doc.boxes.length>0&&window.__lh.editor.doc.boxes.every(b=>b.manual||b.label!==null||b.sources.some(s=>s.startsWith('flow:')))", 40), c.eval("JSON.stringify(window.__lh.editor.doc.boxes.map(b=>b.sources))"))
-    # cargar imágenes con etiquetas desde Gestión → Cargar datos
+    # cargar imágenes con etiquetas desde Gestión → Archivos fuente
     import base64
 
     b64 = base64.b64encode(img.read_bytes()).decode()
-    c.eval(f"location.hash='p={PID}&v=admin'"); time.sleep(0.5); c.eval("location.reload()"); time.sleep(2.5)
-    wait_for(c, "!!document.getElementById('tab-import')")
-    c.eval("document.getElementById('tab-import').click()")
-    check("la gestión ofrece cargar imágenes y videos", wait_for(c, "!!document.getElementById('imp-files')&&!!document.getElementById('imp-vfiles')"))
+    c.eval(f"location.hash='p={PID}&v=admin&t=files'"); time.sleep(0.5); c.eval("location.reload()"); time.sleep(2.5)
+    check("cada sección de la gestión tiene su ruta: la dirección abre «Archivos fuente»", wait_for(c, "document.getElementById('tab-files')?.getAttribute('aria-current')==='page'&&!!document.getElementById('src-upload')"), c.eval("location.hash"))
+    c.eval("document.getElementById('tab-train').click()")
+    check("al cambiar de sección cambia la ruta", wait_for(c, "location.hash.includes('t=train')&&!!document.getElementById('tr-go')"), c.eval("location.hash"))
+    c.eval("history.back()")
+    check("«atrás» vuelve a la sección anterior", wait_for(c, "location.hash.includes('t=files')&&document.getElementById('tab-files').getAttribute('aria-current')==='page'"))
+    c.eval("document.getElementById('src-upload').click()")
+    check("«Cargar archivos» abre una ventana con imágenes y videos", wait_for(c, "!!document.getElementById('upload-modal')&&!!document.getElementById('imp-files')"))
     n_before = len(root.get(f"/api/projects/{PID}/frames"))
     c.eval("""(()=>{const b=atob('%s'),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
       const dt=new DataTransfer();dt.items.add(new File([u],'nueva.jpg',{type:'image/jpeg'}));dt.items.add(new File(['0 0.5 0.5 0.1 0.1\\n'],'nueva.txt',{type:'text/plain'}));dt.items.add(new File(['Piojo\\nMosca\\n'],'classes.txt',{type:'text/plain'}));
       const i=document.getElementById('imp-files');i.files=dt.files;i.dispatchEvent(new Event('change',{bubbles:true}))})()""" % b64)
     check("elegir archivos resume cuántas imágenes y archivos de etiquetas hay", wait_for(c, "document.getElementById('imp-summary')?.textContent.includes('1 imagen ')&&document.getElementById('imp-summary').textContent.includes('2 de etiquetas')"), c.eval("document.getElementById('imp-summary')?.textContent"))
     c.eval("document.getElementById('imp-send').click()")
-    check("cargar al proyecto informa imágenes y cajas", wait_for(c, "document.getElementById('imp-result')?.textContent.includes('1 imagen cargada')&&document.getElementById('imp-result').textContent.includes('1 caja')", 20), c.eval("document.getElementById('imp-result')?.textContent||document.getElementById('imp-err')?.textContent"))
-    check("la imagen cargada aparece en el proyecto con su etiqueta", len(root.get(f"/api/projects/{PID}/frames")) == n_before + 1)
+    c.eval("document.getElementById('um-x').click()")  # se cierra la ventana de inmediato: la subida no se cancela
+    check("cerrar la ventana no cancela la subida: el panel de subidas informa el resultado", wait_for(c, "!document.getElementById('upload-modal')&&[...document.querySelectorAll('#upload-dock .udock-item.done')].some(n=>n.textContent.includes('1 imagen cargada')&&n.textContent.includes('1 caja'))", 25), c.eval("document.getElementById('upload-dock')?.innerText"))
+    check("la imagen cargada aparece en el proyecto y en «Imágenes sueltas»", len(root.get(f"/api/projects/{PID}/frames")) == n_before + 1 and wait_for(c, "[...document.querySelectorAll('#src-images .srcitem')].some(n=>n.textContent.includes('nueva.jpg'))"))
     # videos: muestreo automático (intervalo y rango) y manual (reproducir y tomar instantáneas)
     import subprocess
 
@@ -164,18 +169,25 @@ try:
     put_video = """(()=>{const b=atob('%s'),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
       const dt=new DataTransfer();dt.items.add(new File([u],'%s',{type:'video/mp4'}));
       const i=document.getElementById('imp-vfiles');i.files=dt.files;i.dispatchEvent(new Event('change',{bubbles:true}))})()"""
+    c.eval("document.getElementById('src-upload').click()"); wait_for(c, "!!document.getElementById('um-tab-video')")
+    c.eval("document.getElementById('um-tab-video').click()"); wait_for(c, "!!document.getElementById('imp-vfiles')")
     c.eval(put_video % (vb64, "auto.mp4"))
     wait_for(c, "!!document.getElementById('imp-interval')")
     set_input(c, "imp-interval", "1", "input"); set_input(c, "imp-start", "1", "input"); set_input(c, "imp-end", "3", "input")
     c.eval("document.getElementById('imp-vsend').click()")
-    check("video automático: un fotograma por segundo entre 1 y 3 s da 3 imágenes", wait_for(c, "[...document.querySelectorAll('#import-videos .importnote')].some(n=>n.textContent.includes('auto')&&n.textContent.includes('3 imágenes planificadas'))", 40) and wait_for(c, "[...document.querySelectorAll('.sampling-progress')].some(n=>n.textContent.includes('extracción terminada'))", 40), c.eval("document.getElementById('import-videos').innerText.slice(-200)"))
+    c.eval("document.getElementById('um-x').click()")
+    check("video automático: un fotograma por segundo entre 1 y 3 s da 3 imágenes", wait_for(c, "[...document.querySelectorAll('#upload-dock .udock-item.done')].some(n=>n.textContent.includes('auto.mp4')&&n.textContent.includes('imágenes extraídas'))", 60) and wait_for(c, "[...document.querySelectorAll('#imp-videos tbody tr')].some(r=>r.dataset.video==='auto'&&r.children[4].textContent==='3')", 20), c.eval("document.getElementById('imp-videos').innerText"))
+    check("los muestreos solo se ofrecen en los videos y las imágenes sueltas no los traen", c.eval("document.querySelectorAll('#imp-videos .imp-auto').length>=1&&document.querySelectorAll('#src-images button').length===0"))
+    c.eval("document.getElementById('src-upload').click()"); wait_for(c, "!!document.getElementById('um-tab-video')")
+    c.eval("document.getElementById('um-tab-video').click()"); wait_for(c, "!!document.getElementById('imp-mode-manual')")
     c.eval("document.getElementById('imp-mode-manual').click()"); time.sleep(0.3)
     check("en modo manual no se piden intervalo ni rango", c.eval("!document.getElementById('imp-interval')&&!!document.getElementById('imp-manual-note')"))
     c.eval(put_video % (vb64, "manual.mp4"))
     wait_for(c, "!!document.getElementById('imp-vlist')")
     c.eval("document.getElementById('imp-vsend').click()")
-    check("video manual: se sube con una sola imagen y ofrece abrir el muestreo", wait_for(c, "[...document.querySelectorAll('#import-videos .importnote')].some(n=>n.textContent.includes('manual')&&n.textContent.includes('subido'))", 40))
-    c.eval("[...document.querySelectorAll('#import-videos .importnote button')].find(b=>b.textContent.includes('Abrir muestreo manual')).click()")
+    c.eval("document.getElementById('um-x').click()")
+    check("video manual: se sube y el panel de subidas ofrece abrir el muestreo", wait_for(c, "[...document.querySelectorAll('#upload-dock .udock-item.done button')].some(b=>b.textContent.includes('Abrir muestreo manual'))", 40))
+    c.eval("[...document.querySelectorAll('#upload-dock .udock-item.done button')].find(b=>b.textContent.includes('Abrir muestreo manual')).click()")
     check("el muestreo manual abre una pantalla propia con el video y los fotogramas", wait_for(c, "location.hash.includes('v=sample')&&!!document.getElementById('sm-video')&&document.getElementById('sm-time').textContent.includes('de 1')", 25), c.eval("location.hash+' '+document.getElementById('sm-time')?.textContent"))
     check("la pantalla muestra el lienzo único (video) y no el editor separado", c.eval("document.getElementById('sm-mode').textContent.trim()")=="Video" and c.eval("!document.getElementById('quicklabel')"))
     c.eval("(()=>{const v=document.getElementById('sm-video');v.currentTime=2.0})()"); time.sleep(1.2)

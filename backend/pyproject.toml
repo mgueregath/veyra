@@ -1,6 +1,7 @@
 [project]
 name = "labelhub"
-version = "0.5.4"
+version = "0.6.0"
+license = { text = "AGPL-3.0-only" }
 description = "Plataforma multiusuario de etiquetado, entrenamiento y detección en vivo"
 requires-python = ">=3.10"
 dependencies = [

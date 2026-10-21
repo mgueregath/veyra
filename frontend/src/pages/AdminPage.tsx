@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Icon, { type IconName } from "../components/Icon";
-import ImportTab from "../components/ImportTab";
+import SourcesTab from "../components/SourcesTab";
 import ModePicker from "../components/ModePicker";
 import { DetectorSelect } from "../components/Flows";
 import SshKeysModal from "../components/SshKeysModal";
@@ -12,11 +12,11 @@ const STATUS_LABEL: Record<Status, string> = {
   pending: "Nadie la revisó", single: "Revisada por 1 persona", agreed: "Varias, de acuerdo", disagreement: "Varias, en desacuerdo", final: "Final (decidió el revisor)",
 };
 
-type Tab = "quality" | "assign" | "import" | "datasets" | "train" | "assist" | "eval" | "workspace" | "team" | "config" | "system";
+type Tab = "quality" | "assign" | "files" | "datasets" | "train" | "assist" | "eval" | "workspace" | "team" | "config" | "system";
 const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: string; sub: (n: string) => string }[] = [
   { k: "quality", label: "Calidad", icon: "shield", title: "Calidad del etiquetado", hint: "Estado del etiquetado, acuerdo entre personas y trabajo de cada una", sub: (n) => `Resumen del estado del etiquetado, acuerdo entre anotadores y trabajo por persona en el proyecto ${n}.` },
   { k: "assign", label: "Asignaciones", icon: "users", title: "Asignaciones", hint: "Reparto de imágenes entre el equipo", sub: () => "Reparte imágenes pendientes y organiza el trabajo del equipo." },
-  { k: "import", label: "Cargar datos", icon: "upload", title: "Cargar imágenes y videos", hint: "Agregar imágenes (con o sin etiquetas) y videos al proyecto", sub: (n) => `Agrega material nuevo al proyecto ${n}.` },
+  { k: "files", label: "Archivos fuente", icon: "folder", title: "Archivos fuente", hint: "Videos e imágenes del proyecto, y carga de material nuevo", sub: (n) => `Videos e imágenes de origen de ${n}: de los videos se toman las imágenes por muestreo.` },
   { k: "datasets", label: "Datasets", icon: "database", title: "Versiones del dataset", hint: "Versiones congeladas del dataset y su exportación", sub: () => "Instantáneas congeladas de las anotaciones y divisiones estables basadas en video." },
   { k: "train", label: "Entrenamiento", icon: "cpu", title: "Entrenamiento", hint: "Entrenar modelos en la GPU", sub: () => "Entrena un detector y compara sus resultados." },
   { k: "assist", label: "Asistido", icon: "sparkles", title: "Etiquetado asistido", hint: "Preanotar con un modelo y buscar las imágenes más inciertas", sub: () => "Usa el modelo para proponer cajas y priorizar imágenes." },
@@ -27,11 +27,25 @@ const SECTIONS: { k: Tab; label: string; icon: IconName; title: string; hint: st
   { k: "system", label: "Sistema", icon: "server", title: "Sistema y almacenamiento", hint: "Uso de disco, estado del servicio, copia del proyecto y tu contraseña", sub: () => "Consulta el uso del proyecto y la actividad del servicio." },
 ];
 
+const TAB_KEYS = new Set<string>(SECTIONS.map((x) => x.k));
+const hashTab = (): Tab => {
+  const m = /(?:^|[#&])t=(\w+)/.exec(window.location.hash);
+  const k = m?.[1] === "import" ? "files" : m?.[1];
+  return k && TAB_KEYS.has(k) ? (k as Tab) : "quality";
+};
+
 export default function AdminPage({ project, user, superuser, onBack, onProjects, onModels, onLogout }: { project: Project; user: string; superuser: boolean; onBack: () => void; onProjects: () => void; onModels: () => void; onLogout: () => void }) {
-  const [tab, setTab] = useState<Tab>("quality");
+  const [tab, setTabState] = useState<Tab>(hashTab);
+  // cada sección tiene su ruta (#p=ID&v=admin&t=sección): se puede enlazar, recargar y volver con «atrás»
+  const setTab = (t: Tab) => { window.location.hash = `p=${project.id}&v=admin&t=${t}`; };
+  useEffect(() => {
+    const on = () => setTabState(hashTab());
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
   const [preset, setPreset] = useState<string | null>(null);
   const isAdmin = project.role === "admin";
-  const sec = SECTIONS.find((x) => x.k === tab)!;
+  const sec = SECTIONS.find((x) => x.k === (tab === "workspace" && !isAdmin ? "quality" : tab))!;
   return (
     <div className="page adm-page">
       <TopNav project={project} user={user} active="admin" onProjects={onProjects} onLabel={onBack} onModels={onModels} onAdmin={() => undefined} onLogout={onLogout} />
@@ -52,7 +66,7 @@ export default function AdminPage({ project, user, superuser, onBack, onProjects
           </div>
           {tab === "quality" && <Quality project={project} />}
           {tab === "assign" && <Assign project={project} isAdmin={isAdmin} />}
-          {tab === "import" && <ImportTab project={project} canImport={isAdmin || project.role === "reviewer"} />}
+          {tab === "files" && <SourcesTab project={project} canImport={isAdmin || project.role === "reviewer"} />}
           {tab === "datasets" && <Datasets project={project} isAdmin={isAdmin} />}
           {tab === "train" && <Training project={project} onEvaluate={(id) => { setPreset(`model:${id}`); setTab("eval"); }} />}
           {tab === "assist" && <Assisted project={project} isAdmin={isAdmin} />}

@@ -196,3 +196,26 @@ def test_imported_video_can_be_used_for_live_sessions(client, world, db, vfr_vid
     import os
 
     assert os.path.isabs(db.get(Video, d["video_id"]).path)  # el inicio en vivo exige ruta absoluta existente
+
+
+def test_sources_list_videos_and_images_separately(client, world, db, vfr_video):
+    adm, pid = as_user("adm"), world["project"].id
+    post(adm, pid, [("files", ("a.jpg", jpg(), "image/jpeg")), ("files", ("b.jpg", jpg(), "image/jpeg"))])
+    v = up(adm, pid, vfr_video.read_bytes(), mode="manual").json()
+    vids = adm.get(f"/api/projects/{pid}/sources/videos").json()
+    assert (
+        [x["name"] for x in vids] == ["mi video"]
+        and vids[0]["has_file"]
+        and vids[0]["bytes"]
+        and vids[0]["n_frames"] == 1
+    )
+    assert vids[0]["id"] == v["video_id"] and vids[0]["origin"] == "carga"
+    imgs = adm.get(f"/api/projects/{pid}/sources/images").json()
+    names = {i["name"] for i in imgs["items"]}
+    assert {"a.jpg", "b.jpg"} <= names and imgs["total"] >= 2  # las imágenes de un video con original no aparecen aquí
+    assert all(i["batch"] != "mi video" for i in imgs["items"])
+    assert any(b["origin"] == "carga" and b["name"].startswith("subidas-") for b in imgs["batches"])
+    lote = next(b["name"] for b in imgs["batches"] if b["name"].startswith("subidas-"))
+    one = adm.get(f"/api/projects/{pid}/sources/images", params={"batch": lote, "limit": 1, "offset": 1}).json()
+    assert one["total"] == 2 and len(one["items"]) == 1
+    assert as_user("intruso").get(f"/api/projects/{pid}/sources/videos").status_code == 404
