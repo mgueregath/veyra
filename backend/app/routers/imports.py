@@ -1,3 +1,4 @@
+import bisect
 import datetime as dt
 import io
 import shutil
@@ -7,6 +8,7 @@ from pathlib import Path, PurePosixPath
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -17,13 +19,14 @@ from ..config import settings
 from ..db import get_db
 from ..deps import current_user, role_in
 from ..models import Annotation, AnnotationBox, AuditLog, Frame, Project, User, Video
-from .videos import _LOCK
+from .videos import _LOCK, _real_path, _video_for
 
 router = APIRouter(prefix="/api", tags=["import"])
 ROLES = {"admin", "reviewer"}
 MAX_ENTRIES = 5000
 MAX_UNZIPPED = 4 * 1024**3
 MAX_IMAGE_PIXELS = 100_000_000
+MAX_SAMPLES = 300  # por solicitud: cada fotograma lanza ffmpeg y el proxy corta las respuestas largas
 
 
 def _project(db: Session, user: User, pid: int) -> Project:
@@ -182,24 +185,102 @@ async def import_images(
     return {**res, "skipped": res["skipped"][:20], "warnings": sorted(warnings), "batch": v.name}
 
 
+def plan_samples(pts: list[float], start: float, end: float | None, interval: float) -> list[int]:
+    """Índices de los fotogramas más cercanos a start, start+interval, … hasta `end` (sin repetir)."""
+    last = pts[-1] if end is None else min(end, pts[-1])
+    if start > last:
+        raise ValueError("el inicio queda después del final del video")
+    if end is not None and end < start:
+        raise ValueError("el final debe ser posterior al inicio")
+    idxs: list[int] = []
+    k = 0
+    while start + k * interval <= last + 1e-9:
+        t = start + k * interval
+        i = bisect.bisect_left(pts, t)
+        cands = [j for j in (i - 1, i) if 0 <= j < len(pts)]
+        idx = min(cands, key=lambda j: abs(pts[j] - t))
+        if not idxs or idxs[-1] != idx:
+            idxs.append(idx)
+        k += 1
+        if k > 100_000:
+            break
+    return idxs
+
+
+def _extract(db: Session, p: Project, v: Video, path: str, pts: list[float], idxs: list[int]) -> tuple[int, int]:
+    """Agrega como imágenes los fotogramas `idxs` que aún no existan. Devuelve (nuevas, ya existentes)."""
+    have = set(db.scalars(select(Frame.frame_index).where(Frame.video_id == v.id)))
+    pos = (db.scalar(select(func.max(Frame.position)).where(Frame.project_id == p.id)) or 0) + 1
+    (Path(settings.media_root) / v.name).mkdir(parents=True, exist_ok=True)
+    made = 0
+    for idx in idxs:
+        if idx in have:
+            continue
+        with _LOCK:
+            bgr = vid.extract_exact_frame(path, pts, idx)
+        if bgr is None:
+            continue
+        h, w = bgr.shape[:2]
+        rel = f"{v.name}/f{idx:06d}.jpg"
+        cv2.imwrite(str(Path(settings.media_root) / rel), bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        db.add(
+            Frame(
+                project_id=p.id,
+                video_id=v.id,
+                frame_index=idx,
+                t=round(pts[idx], 3),
+                image_path=rel,
+                width=w,
+                height=h,
+                stratum="carga",
+                position=pos,
+                meta={"origin": "carga", "t_src": "pts"},
+            )
+        )
+        pos += 1
+        made += 1
+    return made, len([i for i in idxs if i in have])
+
+
+def _checked_plan(pts: list[float], start: float, end: float | None, interval: float) -> list[int]:
+    try:
+        idxs = plan_samples(pts, start, end, interval)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    if len(idxs) > MAX_SAMPLES:
+        raise HTTPException(
+            422,
+            f"Con ese intervalo salen {len(idxs)} imágenes (máximo {MAX_SAMPLES} por vez): amplíalo o acota el rango",
+        )
+    return idxs
+
+
 @router.post("/projects/{project_id}/import/video")
 def import_video(
     project_id: int,
     file: UploadFile = File(...),
-    samples: int = Form(8),
+    mode: str = Form("auto"),
+    interval: float = Form(5.0),
+    start: float = Form(0.0),
+    end: float | None = Form(None),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
     """Agrega un video: queda disponible para el reproductor, las ejecuciones y las capturas.
 
-    Se extraen `samples` fotogramas repartidos en el video como primeras imágenes para etiquetar (0 = solo el primero).
+    mode=auto: se extrae un fotograma cada `interval` segundos entre `start` y `end` (por defecto, hasta el final).
+    mode=manual: solo se crea la primera imagen; la persona toma las instantáneas reproduciendo el video.
     """
     p = _project(db, user, project_id)
     ext = PurePosixPath(file.filename or "").suffix.lower()
     if ext not in imp.VIDEO_EXT:
         raise HTTPException(422, "Formato no admitido (mp4, mov, m4v, avi, mkv o webm)")
-    if not 0 <= samples <= 200:
-        raise HTTPException(422, "samples debe estar entre 0 y 200")
+    if mode not in ("auto", "manual"):
+        raise HTTPException(422, "mode debe ser auto o manual")
+    if mode == "auto" and (interval < 0.04 or start < 0 or (end is not None and end < 0)):
+        raise HTTPException(
+            422, "El intervalo debe ser de al menos 0,04 s y el inicio y el final no pueden ser negativos"
+        )
     try:
         usage.check_quota(db, p)
     except ValueError as e:
@@ -220,38 +301,11 @@ def import_video(
             raise HTTPException(422, "El archivo no es un video legible") from None
         if not pts:
             raise HTTPException(422, "El video no tiene fotogramas")
+        idxs = _checked_plan(pts, start, end, interval) if mode == "auto" else [0]
         v = Video(project_id=p.id, name=name, path=str(dest), meta={**info, "pts": pts, "origin": "carga"})
         db.add(v)
         db.flush()
-        n = len(pts)
-        picks = sorted({0, *(round(i * (n - 1) / max(1, samples)) for i in range(samples))}) if samples else [0]
-        pos = (db.scalar(select(func.max(Frame.position)).where(Frame.project_id == p.id)) or 0) + 1
-        frames_dir.mkdir(parents=True, exist_ok=True)
-        made = 0
-        for idx in picks:
-            with _LOCK:
-                bgr = vid.extract_exact_frame(str(dest), pts, idx)
-            if bgr is None:
-                continue
-            h, w = bgr.shape[:2]
-            rel = f"{name}/f{idx:06d}.jpg"
-            cv2.imwrite(str(Path(settings.media_root) / rel), bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
-            db.add(
-                Frame(
-                    project_id=p.id,
-                    video_id=v.id,
-                    frame_index=idx,
-                    t=round(pts[idx], 3),
-                    image_path=rel,
-                    width=w,
-                    height=h,
-                    stratum="carga",
-                    position=pos,
-                    meta={"origin": "carga", "t_src": "pts"},
-                )
-            )
-            pos += 1
-            made += 1
+        made, _ = _extract(db, p, v, str(dest), pts, idxs)
         if not made:
             raise HTTPException(422, "No se pudo extraer ningún fotograma del video")
         db.add(
@@ -260,7 +314,7 @@ def import_video(
                 project_id=p.id,
                 action="import.video",
                 target=f"video:{v.id}",
-                detail={"name": name, "frames": made, "duration": info["dur"]},
+                detail={"name": name, "frames": made, "mode": mode, "duration": info["dur"]},
             )
         )
         db.commit()
@@ -270,4 +324,48 @@ def import_video(
         if not frames_existed:
             shutil.rmtree(frames_dir, ignore_errors=True)
         raise
-    return {"video_id": v.id, "name": name, "frames": made, "duration": info["dur"], "fps": info["fps"]}
+    first = db.scalar(select(Frame.id).where(Frame.video_id == v.id).order_by(Frame.frame_index))
+    return {
+        "video_id": v.id,
+        "name": name,
+        "frames": made,
+        "duration": info["dur"],
+        "fps": info["fps"],
+        "first_frame_id": first,
+        "mode": mode,
+    }
+
+
+class SampleIn(BaseModel):
+    start: float = Field(0.0, ge=0)
+    end: float | None = Field(None, ge=0)
+    interval: float = Field(5.0, ge=0.04)
+
+
+@router.post("/videos/{video_id}/sample")
+def sample_video(video_id: int, body: SampleIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Muestreo automático de un video ya cargado: un fotograma cada `interval` s entre `start` y `end`."""
+    v = _video_for(db, video_id, user)
+    if role_in(db, user, v.project_id) not in ROLES:
+        raise HTTPException(403, "Solo administración y revisión pueden cargar imágenes y videos")
+    p = db.get(Project, v.project_id)
+    path = _real_path(v)
+    if "pts" not in (v.meta or {}):
+        v.meta = {**(v.meta or {}), "pts": vid.video_pts(path)}
+    pts = v.meta["pts"]
+    try:
+        usage.check_quota(db, p)
+    except ValueError as e:
+        raise HTTPException(507, str(e)) from None
+    made, existing = _extract(db, p, v, path, pts, _checked_plan(pts, body.start, body.end, body.interval))
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            project_id=p.id,
+            action="video.sample",
+            target=f"video:{v.id}",
+            detail={"frames": made, **body.model_dump()},
+        )
+    )
+    db.commit()
+    return {"video_id": v.id, "frames": made, "already": existing}

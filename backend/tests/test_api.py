@@ -203,7 +203,14 @@ def test_project_videos_list(client, world, db, vfr_video):
     db.commit()
     login(client, "lector")
     assert client.get(f"/api/projects/{world['project'].id}/videos").json() == [
-        {"id": db.query(Video).one().id, "name": "v1", "has_file": True}
+        {
+            "id": db.query(Video).one().id,
+            "name": "v1",
+            "has_file": True,
+            "n_frames": 2,
+            "first_frame_id": min(f.id for f in world["frames"]),
+            "duration": None,
+        }
     ]
     client.post("/api/auth/logout")
     login(client, "intruso")

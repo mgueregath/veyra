@@ -156,6 +156,33 @@ try:
     c.eval("document.getElementById('imp-send').click()")
     check("cargar al proyecto informa imágenes y cajas", wait_for(c, "document.getElementById('imp-result')?.textContent.includes('1 imagen cargada')&&document.getElementById('imp-result').textContent.includes('1 caja')", 20), c.eval("document.getElementById('imp-result')?.textContent||document.getElementById('imp-err')?.textContent"))
     check("la imagen cargada aparece en el proyecto con su etiqueta", len(root.get(f"/api/projects/{PID}/frames")) == n_before + 1)
+    # videos: muestreo automático (intervalo y rango) y manual (reproducir y tomar instantáneas)
+    import subprocess
+
+    mp4 = env.data / "demo.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x96:rate=30:duration=4", "-pix_fmt", "yuv420p", str(mp4)], check=True)
+    vb64 = base64.b64encode(mp4.read_bytes()).decode()
+    put_video = """(()=>{const b=atob('%s'),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+      const dt=new DataTransfer();dt.items.add(new File([u],'%s',{type:'video/mp4'}));
+      const i=document.getElementById('imp-vfiles');i.files=dt.files;i.dispatchEvent(new Event('change',{bubbles:true}))})()"""
+    c.eval(put_video % (vb64, "auto.mp4"))
+    wait_for(c, "!!document.getElementById('imp-interval')")
+    set_input(c, "imp-interval", "1", "input"); set_input(c, "imp-start", "1", "input"); set_input(c, "imp-end", "3", "input")
+    c.eval("document.getElementById('imp-vsend').click()")
+    check("video automático: un fotograma por segundo entre 1 y 3 s da 3 imágenes", wait_for(c, "[...document.querySelectorAll('#import-videos .importnote')].some(n=>n.textContent.includes('auto')&&n.textContent.includes('3 imágenes extraídas'))", 40), c.eval("document.getElementById('import-videos').innerText.slice(-200)"))
+    c.eval("document.getElementById('imp-mode-manual').click()"); time.sleep(0.3)
+    check("en modo manual no se piden intervalo ni rango", c.eval("!document.getElementById('imp-interval')&&!!document.getElementById('imp-manual-note')"))
+    c.eval(put_video % (vb64, "manual.mp4"))
+    wait_for(c, "!!document.getElementById('imp-vlist')")
+    c.eval("document.getElementById('imp-vsend').click()")
+    check("video manual: se sube con una sola imagen y ofrece abrir el muestreo", wait_for(c, "[...document.querySelectorAll('#import-videos .importnote')].some(n=>n.textContent.includes('manual')&&n.textContent.includes('subido'))", 40))
+    c.eval("[...document.querySelectorAll('#import-videos .importnote button')].find(b=>b.textContent.includes('Abrir muestreo manual')).click()")
+    check("se abre el reproductor y cargan los fotogramas del video", wait_for(c, "!!document.getElementById('sm-video')&&document.getElementById('sm-time').textContent.includes('de 1')", 20), c.eval("document.getElementById('sm-time')?.textContent"))
+    c.eval("(()=>{const v=document.getElementById('sm-video');v.currentTime=2.0})()"); time.sleep(1)
+    c.eval("document.getElementById('sm-take').click()")
+    check("«Tomar instantánea» guarda el fotograma actual como imagen del proyecto", wait_for(c, "document.getElementById('sm-msg')?.textContent.includes('Instantánea de')&&!!document.getElementById('sm-taken')", 20), c.eval("document.getElementById('sm-msg')?.textContent"))
+    vids_now = {v["name"]: v for v in root.get(f"/api/projects/{PID}/videos")}
+    check("el video manual quedó con 2 imágenes (la primera y la instantánea)", vids_now["manual"]["n_frames"] == 2 and vids_now["auto"]["n_frames"] == 3, {k: v["n_frames"] for k, v in vids_now.items()})
     print("\nRESUMEN: %d/%d OK" % (sum(res.values()), len(res)))
 finally:
     from app import training

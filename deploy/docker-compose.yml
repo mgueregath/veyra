@@ -17,7 +17,7 @@ services:
       retries: 20
 
   api:
-    image: docker.labs.hapticus.cl/veyra:${VEYRA_VERSION:-0.5.0}
+    image: docker.labs.hapticus.cl/veyra:${VEYRA_VERSION:-0.5.1}
     container_name: veyra-api
     restart: unless-stopped
     depends_on:

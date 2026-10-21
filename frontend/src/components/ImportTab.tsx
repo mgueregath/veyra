@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { api, type ImportImagesResult, type ImportVideoResult } from "../api/client";
+import { useQuery } from "@tanstack/react-query";
+import { api, type ImportImagesResult, type ImportVideoResult, type ProjectVideo, type SamplePlan } from "../api/client";
+import { AutoSampler, ManualSampler } from "./VideoSampler";
 import Icon from "./Icon";
 
 const VIDEO_OK = /\.(mp4|mov|m4v|avi|mkv|webm)$/i;
@@ -31,7 +33,13 @@ export default function ImportTab({ projectId, canImport }: { projectId: number;
   const [imgRes, setImgRes] = useState<ImportImagesResult | null>(null);
   const [imgErr, setImgErr] = useState<string | null>(null);
   const [vids, setVids] = useState<File[]>([]);
-  const [samples, setSamples] = useState(8);
+  const [mode, setMode] = useState<"auto" | "manual">("auto");
+  const [interval, setInterval_] = useState(5);
+  const [start, setStart] = useState(0);
+  const [end, setEnd] = useState("");
+  const [manualFor, setManualFor] = useState<ProjectVideo | null>(null);
+  const [autoFor, setAutoFor] = useState<number | null>(null);
+  const videos = useQuery({ queryKey: ["videos", projectId], queryFn: () => api.projectVideos(projectId) });
   const [vidBusy, setVidBusy] = useState<{ i: number; frac: number } | null>(null);
   const [vidRes, setVidRes] = useState<(ImportVideoResult | { name: string; error: string })[]>([]);
 
@@ -43,10 +51,11 @@ export default function ImportTab({ projectId, canImport }: { projectId: number;
   };
   const sendVideos = async () => {
     setVidRes([]);
+    const plan: SamplePlan = { mode, interval, start, end: end === "" ? null : +end };
     const out: (ImportVideoResult | { name: string; error: string })[] = [];
     for (let i = 0; i < vids.length; i++) {
       setVidBusy({ i, frac: 0 });
-      try { out.push(await api.importVideo(projectId, vids[i], samples, (frac) => setVidBusy({ i, frac }))); }
+      try { out.push(await api.importVideo(projectId, vids[i], plan, (frac) => setVidBusy({ i, frac }))); }
       catch (e) { out.push({ name: vids[i].name, error: (e as Error).message }); }
       setVidRes([...out]);
     }
@@ -90,13 +99,42 @@ export default function ImportTab({ projectId, canImport }: { projectId: number;
           <small>mp4, mov, m4v, avi, mkv, webm</small>
         </Drop>
         {!!vids.length && <ul id="imp-vlist" className="mut">{vids.map((f, i) => <li key={i}>{f.name} · {fmt(f.size)}{vidBusy?.i === i ? ` · subiendo ${Math.round(vidBusy.frac * 100)} %` : ""}</li>)}</ul>}
+        <div className="radios" id="imp-mode">
+          <label><input type="radio" name="imp-mode" id="imp-mode-auto" checked={mode === "auto"} onChange={() => setMode("auto")} /> <b>Automático</b>: un fotograma cada cierto intervalo, dentro de un rango</label>
+          <label><input type="radio" name="imp-mode" id="imp-mode-manual" checked={mode === "manual"} onChange={() => setMode("manual")} /> <b>Manual</b>: reproduzco el video y tomo las instantáneas yo</label>
+        </div>
+        {mode === "auto" && (
+          <div className="formrow" id="imp-auto">
+            <label>Un fotograma cada <input type="number" id="imp-interval" min={0.04} step={0.5} value={interval} onChange={(e) => setInterval_(+e.target.value)} style={{ width: 70 }} /> s</label>
+            <label>desde <input type="number" id="imp-start" min={0} step={1} value={start} onChange={(e) => setStart(Math.max(0, +e.target.value))} style={{ width: 70 }} /> s</label>
+            <label>hasta <input type="number" id="imp-end" min={0} step={1} placeholder="el final" value={end} onChange={(e) => setEnd(e.target.value)} style={{ width: 70 }} /> s</label>
+            <span className="mut">máximo 300 imágenes por video</span>
+          </div>
+        )}
+        {mode === "manual" && <p className="mut" id="imp-manual-note">El video se sube con su primera imagen y se abre el reproductor para que tomes las instantáneas.</p>}
         <div className="formrow">
-          <label title="Cuántos fotogramas repartidos en el video se agregan como imágenes para etiquetar (0 = solo el primero)">Fotogramas a extraer <input type="number" id="imp-samples" min={0} max={200} value={samples} onChange={(e) => setSamples(Math.max(0, Math.min(200, +e.target.value)))} style={{ width: 70 }} /></label>
           <button className="primary" id="imp-vsend" disabled={!vids.length || vidBusy !== null} onClick={() => void sendVideos()}>{vidBusy ? `Procesando ${vidBusy.i + 1} de ${vids.length}…` : `Cargar ${vids.length || ""} video${vids.length === 1 ? "" : "s"} (${fmt(vidBytes)})`}</button>
         </div>
         {vidRes.map((r) => "error" in r
           ? <p key={r.name} className="err">{r.name}: {r.error}</p>
-          : <div key={r.video_id} className="importnote"><b>{r.name}</b>: {r.frames} imágenes extraídas · {Math.round(r.duration)} s a {r.fps.toFixed(1)} fps.</div>)}
+          : <div key={r.video_id} className="importnote"><b>{r.name}</b>: {r.frames === 1 && r.mode === "manual" ? "subido" : `${r.frames} imágenes extraídas`} · {Math.round(r.duration)} s a {r.fps.toFixed(1)} fps.
+            {r.mode === "manual" && <button className="btn" onClick={() => setManualFor({ id: r.video_id, name: r.name, has_file: true, n_frames: r.frames, first_frame_id: r.first_frame_id, duration: r.duration })}>Abrir muestreo manual</button>}</div>)}
+      </div>
+      {manualFor && <ManualSampler key={manualFor.id} video={manualFor} onClose={() => setManualFor(null)} />}
+      <div className="panel" id="import-existing">
+        <h2>Videos del proyecto</h2>
+        <p className="mut">Toma más imágenes de un video ya cargado, de forma automática o manual.</p>
+        <table className="tbl" id="imp-videos">
+          <thead><tr><th>Video</th><th>Imágenes</th><th>Duración</th><th></th></tr></thead>
+          <tbody>{(videos.data ?? []).map((v) => (
+            <tr key={v.id}><td>{v.name}</td><td>{v.n_frames}</td><td>{v.duration ? `${Math.round(v.duration)} s` : "—"}</td>
+              <td>{v.has_file ? <>
+                <button className="btn imp-auto" onClick={() => setAutoFor(autoFor === v.id ? null : v.id)}>Muestreo automático</button>{" "}
+                <button className="btn imp-manual" disabled={v.first_frame_id === null} onClick={() => setManualFor(v)}>Muestreo manual</button>
+                {autoFor === v.id && <AutoSampler video={v} onDone={() => undefined} />}
+              </> : <span className="mut">sin archivo original</span>}</td></tr>
+          ))}</tbody>
+        </table>
       </div>
     </div>
   );

@@ -95,27 +95,68 @@ def test_import_permissions_and_errors(client, world):
     assert post(as_user("intruso"), pid, [("files", ("a.jpg", jpg(), "image/jpeg"))]).status_code == 404
     assert post(as_user("adm"), pid, [("files", ("a.txt", b"x", "text/plain"))]).status_code == 422
     assert post(as_user("adm"), pid, [("files", ("z.zip", b"no", "application/zip"))]).status_code == 422
-    r = as_user("adm").post(f"/api/projects/{pid}/import/video", files={"file": ("v.exe", b"x")})
-    assert r.status_code == 422
 
 
-def test_import_video_extracts_frames_and_is_playable(client, world, db, vfr_video):
+def test_plan_samples():
+    from app.routers.imports import plan_samples
+
+    pts = [i / 10 for i in range(101)]  # 0..10 s a 10 fps
+    assert plan_samples(pts, 0, None, 2.5) == [0, 25, 50, 75, 100]
+    assert plan_samples(pts, 3, 6, 1) == [30, 40, 50, 60]
+    with pytest.raises(ValueError):
+        plan_samples(pts, 20, None, 1)
+    with pytest.raises(ValueError):
+        plan_samples(pts, 5, 2, 1)
+
+
+def up(c, pid, data, **form):
+    return c.post(f"/api/projects/{pid}/import/video", files={"file": ("mi video.mp4", data)}, data=form)
+
+
+def test_import_video_automatic_sampling_by_interval_and_range(client, world, db, vfr_video):
     adm, pid = as_user("adm"), world["project"].id
-    data = vfr_video.read_bytes()
-    r = adm.post(f"/api/projects/{pid}/import/video", files={"file": ("mi video.mp4", data)}, data={"samples": "4"})
+    data = vfr_video.read_bytes()  # 3 s
+    r = up(adm, pid, data, mode="auto", interval="1", start="0.5", end="2.5")
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["name"] == "mi video" and 2 <= d["frames"] <= 5
+    assert d["name"] == "mi video" and d["frames"] == 3  # 0,5 · 1,5 · 2,5 s
     v = db.get(Video, d["video_id"])
     assert v.path and v.meta["fps"] and v.meta["pts"]
     fr = db.query(Frame).filter(Frame.video_id == v.id).order_by(Frame.frame_index).all()
-    assert fr[0].frame_index == 0 and all(f.stratum == "carga" for f in fr)
+    assert all(f.stratum == "carga" for f in fr) and 0.4 < fr[0].t < 0.6 and 2.4 < fr[-1].t <= 2.6
     assert adm.get(f"/api/frames/{fr[-1].id}/image").status_code == 200
     assert adm.get(f"/api/videos/{v.id}/info").status_code == 200  # el reproductor lo puede abrir
-    r2 = adm.post(f"/api/projects/{pid}/import/video", files={"file": ("mi video.mp4", data)}, data={"samples": "0"})
-    assert r2.json()["name"] == "mi video-2" and r2.json()["frames"] == 1
-    bad = adm.post(f"/api/projects/{pid}/import/video", files={"file": ("roto.mp4", b"no es video")})
-    assert bad.status_code == 422 and not (db.query(Video).filter(Video.name == "roto").count())
+    # muestreo posterior sobre el mismo video: no duplica lo que ya existe
+    r2 = adm.post(f"/api/videos/{v.id}/sample", json={"start": 0.5, "end": 2.5, "interval": 1})
+    assert r2.status_code == 200 and r2.json() == {"video_id": v.id, "frames": 0, "already": 3}
+    r3 = adm.post(f"/api/videos/{v.id}/sample", json={"start": 0, "end": 1, "interval": 0.5})
+    assert r3.json()["frames"] == 2 and r3.json()["already"] == 1  # 0 y 1 s son nuevas, 0,5 ya estaba
+    assert adm.post(f"/api/videos/{v.id}/sample", json={"interval": 0.04}).status_code == 200
+    assert adm.post(f"/api/videos/{v.id}/sample", json={"start": 9, "interval": 1}).status_code == 422
+    assert as_user("ana").post(f"/api/videos/{v.id}/sample", json={"interval": 1}).status_code == 403
+
+
+def test_import_video_manual_creates_only_the_first_frame_then_snapshots(client, world, db, vfr_video):
+    adm, pid = as_user("adm"), world["project"].id
+    d = up(adm, pid, vfr_video.read_bytes(), mode="manual").json()
+    assert d["frames"] == 1 and d["mode"] == "manual" and d["first_frame_id"]
+    row = next(v for v in adm.get(f"/api/projects/{pid}/videos").json() if v["id"] == d["video_id"])
+    assert row["n_frames"] == 1 and row["first_frame_id"] == d["first_frame_id"] and row["has_file"]
+    pts = adm.get(f"/api/videos/{d['video_id']}/pts").json()["pts"]
+    r = adm.post(f"/api/frames/{d['first_frame_id']}/snapshot", json={"t": pts[40]})
+    assert r.status_code == 200 and r.json()["existing"] is False
+    assert next(v for v in adm.get(f"/api/projects/{pid}/videos").json() if v["id"] == d["video_id"])["n_frames"] == 2
+
+
+def test_import_video_rejects_bad_input_and_cleans_up(client, world, db, vfr_video):
+    adm, pid = as_user("adm"), world["project"].id
+    assert adm.post(f"/api/projects/{pid}/import/video", files={"file": ("v.exe", b"x")}).status_code == 422
+    bad = up(adm, pid, b"no es video")
+    assert bad.status_code == 422 and not db.query(Video).filter(Video.name == "mi video").count()
+    assert up(adm, pid, vfr_video.read_bytes(), mode="auto", interval="0.001").status_code == 422
+    assert up(adm, pid, vfr_video.read_bytes(), mode="otro").status_code == 422
+    assert up(adm, pid, vfr_video.read_bytes(), mode="auto", interval="1", start="2", end="1").status_code == 422
+    assert not db.query(Video).filter(Video.name == "mi video").count()  # nada quedó a medias
 
 
 @pytest.mark.parametrize("ext", ["mp4"])

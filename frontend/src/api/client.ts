@@ -60,7 +60,7 @@ export type FlowNode = FlowLeaf | FlowGroup;
 export interface Flow { id: number; name: string; spec: FlowNode; text: string; updated_at: string }
 export interface Procedure { name: string; entry: string; doc: string; params: Record<string, unknown> }
 export interface ProcedureList { available: boolean; procedures: Procedure[]; ref: string | null; error: string | null }
-export interface ProjectVideo { id: number; name: string; has_file: boolean }
+export interface ProjectVideo { id: number; name: string; has_file: boolean; n_frames: number; first_frame_id: number | null; duration: number | null }
 export interface TeamMember { username: string; display_name: string | null; active: boolean; role: string }
 export interface Usage { images: { files: number; bytes: number }; videos: { files: number; bytes: number }; models: { bytes: number }; exports: { bytes: number }; owned_bytes: number; quota_bytes: number | null; over_quota: boolean }
 export interface SystemInfo { jobs: { queued: number; running: number }; live_active: number; recent: { at: string; user: string | null; action: string; target: string | null }[] }
@@ -83,7 +83,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface ImportImagesResult { images: number; with_labels: number; boxes: number; skipped: string[]; warnings: string[]; batch: string }
-export interface ImportVideoResult { video_id: number; name: string; frames: number; duration: number; fps: number }
+export interface ImportVideoResult { video_id: number; name: string; frames: number; duration: number; fps: number; first_frame_id: number | null; mode: "auto" | "manual" }
+export interface SamplePlan { mode: "auto" | "manual"; interval: number; start: number; end: number | null }
 
 /** Subida con progreso (fetch no lo informa). */
 function upload<T>(path: string, fd: FormData, onProgress: (frac: number) => void): Promise<T> {
@@ -177,10 +178,14 @@ export const api = {
     fd.append("reviewed", String(reviewed));
     return upload<ImportImagesResult>(`/api/projects/${pid}/import/images`, fd, onProgress);
   },
-  importVideo: (pid: number, file: File, samples: number, onProgress: (f: number) => void) => {
+  sampleVideo: (vid: number, body: { interval: number; start: number; end: number | null }) => req<{ video_id: number; frames: number; already: number }>(`/api/videos/${vid}/sample`, { method: "POST", body: JSON.stringify(body) }),
+  importVideo: (pid: number, file: File, plan: SamplePlan, onProgress: (f: number) => void) => {
     const fd = new FormData();
     fd.append("file", file);
-    fd.append("samples", String(samples));
+    fd.append("mode", plan.mode);
+    fd.append("interval", String(plan.interval));
+    fd.append("start", String(plan.start));
+    if (plan.end !== null) fd.append("end", String(plan.end));
     return upload<ImportVideoResult>(`/api/projects/${pid}/import/video`, fd, onProgress);
   },
   flows: (pid: number) => req<Flow[]>(`/api/projects/${pid}/flows`),

@@ -285,4 +285,26 @@ def project_videos(project_id: int, user: User = Depends(current_user), db: Sess
     if not db.get(Project, project_id) or not role_in(db, user, project_id):
         raise HTTPException(404, "Proyecto no encontrado")
     rows = db.scalars(select(Video).where(Video.project_id == project_id).order_by(Video.name)).all()
-    return [{"id": v.id, "name": v.name, "has_file": bool(v.path) and os.path.isfile(v.path)} for v in rows]
+    counts = dict(
+        db.execute(
+            select(Frame.video_id, func.count(Frame.id))
+            .where(Frame.project_id == project_id, Frame.deleted_at.is_(None))
+            .group_by(Frame.video_id)
+        ).all()
+    )
+    firsts = dict(
+        db.execute(
+            select(Frame.video_id, func.min(Frame.id)).where(Frame.project_id == project_id).group_by(Frame.video_id)
+        ).all()
+    )
+    return [
+        {
+            "id": v.id,
+            "name": v.name,
+            "has_file": bool(v.path) and os.path.isfile(v.path),
+            "n_frames": counts.get(v.id, 0),
+            "first_frame_id": firsts.get(v.id),
+            "duration": (v.meta or {}).get("dur"),
+        }
+        for v in rows
+    ]
