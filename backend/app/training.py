@@ -61,7 +61,9 @@ def recover_interrupted() -> int:
     """Al arrancar, los trabajos que quedaron «en curso» (la API se reinició) se marcan como interrumpidos."""
     with SessionLocal() as db:
         runs = db.scalars(
-            select(Run).where(Run.status.in_(["queued", "running"]), Run.kind.in_(["training", "preannotation"]))
+            select(Run).where(
+                Run.status.in_(["queued", "running"]), Run.kind.in_(["training", "preannotation", "sampling"])
+            )
         ).all()
         for r in runs:
             r.status, r.log = "failed", (r.log or "") + "\n[interrumpido: la API se reinició]"

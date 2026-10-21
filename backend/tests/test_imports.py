@@ -109,6 +109,18 @@ def test_plan_samples():
         plan_samples(pts, 5, 2, 1)
 
 
+def wait_sampling(c, run_id, tmo=60):
+    import time
+
+    t0 = time.time()
+    while run_id and time.time() - t0 < tmo:
+        r = c.get(f"/api/runs/{run_id}").json()
+        if r["status"] in ("done", "failed"):
+            return r
+        time.sleep(0.2)
+    return None
+
+
 def up(c, pid, data, **form):
     return c.post(f"/api/projects/{pid}/import/video", files={"file": ("mi video.mp4", data)}, data=form)
 
@@ -119,7 +131,12 @@ def test_import_video_automatic_sampling_by_interval_and_range(client, world, db
     r = up(adm, pid, data, mode="auto", interval="1", start="0.5", end="2.5")
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["name"] == "mi video" and d["frames"] == 3  # 0,5 · 1,5 · 2,5 s
+    assert (
+        d["name"] == "mi video" and d["planned"] == 3 and d["frames"] == 1
+    )  # 0,5 · 1,5 · 2,5 s: la primera ya, el resto en segundo plano
+    done = wait_sampling(adm, d["run_id"])
+    assert done and done["status"] == "done" and done["summary"]["progress"] == {"done": 2, "total": 2}
+    db.expire_all()
     v = db.get(Video, d["video_id"])
     assert v.path and v.meta["fps"] and v.meta["pts"]
     fr = db.query(Frame).filter(Frame.video_id == v.id).order_by(Frame.frame_index).all()
@@ -128,10 +145,15 @@ def test_import_video_automatic_sampling_by_interval_and_range(client, world, db
     assert adm.get(f"/api/videos/{v.id}/info").status_code == 200  # el reproductor lo puede abrir
     # muestreo posterior sobre el mismo video: no duplica lo que ya existe
     r2 = adm.post(f"/api/videos/{v.id}/sample", json={"start": 0.5, "end": 2.5, "interval": 1})
-    assert r2.status_code == 200 and r2.json() == {"video_id": v.id, "frames": 0, "already": 3}
+    assert r2.status_code == 200 and r2.json() == {"video_id": v.id, "run_id": None, "frames": 0, "already": 3}
     r3 = adm.post(f"/api/videos/{v.id}/sample", json={"start": 0, "end": 1, "interval": 0.5})
     assert r3.json()["frames"] == 2 and r3.json()["already"] == 1  # 0 y 1 s son nuevas, 0,5 ya estaba
-    assert adm.post(f"/api/videos/{v.id}/sample", json={"interval": 0.04}).status_code == 200
+    assert wait_sampling(adm, r3.json()["run_id"])["status"] == "done"
+    db.expire_all()
+    assert db.query(Frame).filter(Frame.video_id == v.id).count() == 5
+    r4 = adm.post(f"/api/videos/{v.id}/sample", json={"interval": 0.04})
+    assert r4.status_code == 200 and r4.json()["frames"] > 60  # sin tope de 300: corre en segundo plano
+    assert wait_sampling(adm, r4.json()["run_id"])["status"] == "done"
     assert adm.post(f"/api/videos/{v.id}/sample", json={"start": 9, "interval": 1}).status_code == 422
     assert as_user("ana").post(f"/api/videos/{v.id}/sample", json={"interval": 1}).status_code == 403
 

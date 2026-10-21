@@ -52,7 +52,7 @@ export default function AdminPage({ project, user, superuser, onBack, onProjects
           </div>
           {tab === "quality" && <Quality project={project} />}
           {tab === "assign" && <Assign project={project} isAdmin={isAdmin} />}
-          {tab === "import" && <ImportTab projectId={project.id} canImport={isAdmin || project.role === "reviewer"} />}
+          {tab === "import" && <ImportTab project={project} canImport={isAdmin || project.role === "reviewer"} />}
           {tab === "datasets" && <Datasets project={project} isAdmin={isAdmin} />}
           {tab === "train" && <Training project={project} onEvaluate={(id) => { setPreset(`model:${id}`); setTab("eval"); }} />}
           {tab === "assist" && <Assisted project={project} isAdmin={isAdmin} />}

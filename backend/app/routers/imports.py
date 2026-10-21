@@ -2,6 +2,7 @@ import bisect
 import datetime as dt
 import io
 import shutil
+import threading
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -16,9 +17,9 @@ from .. import imports as imp
 from .. import usage
 from .. import video as vid
 from ..config import settings
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..deps import current_user, role_in
-from ..models import Annotation, AnnotationBox, AuditLog, Frame, Project, User, Video
+from ..models import Annotation, AnnotationBox, AuditLog, Frame, Project, Run, User, Video
 from .videos import _LOCK, _real_path, _video_for
 
 router = APIRouter(prefix="/api", tags=["import"])
@@ -26,7 +27,7 @@ ROLES = {"admin", "reviewer"}
 MAX_ENTRIES = 5000
 MAX_UNZIPPED = 4 * 1024**3
 MAX_IMAGE_PIXELS = 100_000_000
-MAX_SAMPLES = 300  # por solicitud: cada fotograma lanza ffmpeg y el proxy corta las respuestas largas
+MAX_SAMPLES = 20000  # corre en segundo plano: no depende del tiempo de la petición
 
 
 def _project(db: Session, user: User, pid: int) -> Project:
@@ -242,6 +243,55 @@ def _extract(db: Session, p: Project, v: Video, path: str, pts: list[float], idx
     return made, len([i for i in idxs if i in have])
 
 
+def _run_sampling(run_id: int, video_id: int, path: str, idxs: list[int]) -> None:
+    """Extrae los fotogramas en segundo plano, de a 10, y deja el avance en la ejecución."""
+    err = None
+    made = 0
+    try:
+        with SessionLocal() as db:
+            run = db.get(Run, run_id)
+            run.status = "running"
+            db.commit()
+            v = db.get(Video, video_id)
+            p = db.get(Project, v.project_id)
+            pts = v.meta["pts"]
+            for i in range(0, len(idxs), 10):
+                n, _ = _extract(db, p, v, path, pts, idxs[i : i + 10])
+                made += n
+                run = db.get(Run, run_id)
+                run.metrics = {"progress": {"done": min(i + 10, len(idxs)), "total": len(idxs)}, "frames": made}
+                db.commit()
+    except Exception as e:  # el motivo queda en la ejecución
+        err = str(e)
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        run.finished_at = dt.datetime.now(dt.timezone.utc)
+        run.status = "failed" if err else "done"
+        if err:
+            run.log = err
+        else:
+            run.metrics = {"progress": {"done": len(idxs), "total": len(idxs)}, "frames": made}
+        db.commit()
+
+
+def _start_sampling(db: Session, p: Project, v: Video, path: str, idxs: list[int], user: User, label: str) -> Run:
+    run = Run(
+        project_id=p.id,
+        kind="sampling",
+        name=f"muestreo de «{v.name}» ({label})",
+        params={"video_id": v.id, "frames": len(idxs)},
+        status="queued",
+        created_by=user.id,
+        metrics={"progress": {"done": 0, "total": len(idxs)}, "frames": 0},
+    )
+    db.add(run)
+    db.commit()
+    threading.Thread(
+        target=_run_sampling, args=(run.id, v.id, path, idxs), name=f"sampling-{run.id}", daemon=True
+    ).start()
+    return run
+
+
 def _checked_plan(pts: list[float], start: float, end: float | None, interval: float) -> list[int]:
     try:
         idxs = plan_samples(pts, start, end, interval)
@@ -305,7 +355,7 @@ def import_video(
         v = Video(project_id=p.id, name=name, path=str(dest), meta={**info, "pts": pts, "origin": "carga"})
         db.add(v)
         db.flush()
-        made, _ = _extract(db, p, v, str(dest), pts, idxs)
+        made, _ = _extract(db, p, v, str(dest), pts, idxs[:1])  # la primera ya, para que el video se pueda abrir
         if not made:
             raise HTTPException(422, "No se pudo extraer ningún fotograma del video")
         db.add(
@@ -325,7 +375,10 @@ def import_video(
             shutil.rmtree(frames_dir, ignore_errors=True)
         raise
     first = db.scalar(select(Frame.id).where(Frame.video_id == v.id).order_by(Frame.frame_index))
+    run = _start_sampling(db, p, v, str(dest), idxs[1:], user, "automático") if len(idxs) > 1 else None
     return {
+        "run_id": run.id if run else None,
+        "planned": len(idxs),
         "video_id": v.id,
         "name": name,
         "frames": made,
@@ -357,15 +410,18 @@ def sample_video(video_id: int, body: SampleIn, user: User = Depends(current_use
         usage.check_quota(db, p)
     except ValueError as e:
         raise HTTPException(507, str(e)) from None
-    made, existing = _extract(db, p, v, path, pts, _checked_plan(pts, body.start, body.end, body.interval))
+    idxs = _checked_plan(pts, body.start, body.end, body.interval)
+    have = set(db.scalars(select(Frame.frame_index).where(Frame.video_id == v.id)))
+    todo = [i for i in idxs if i not in have]
     db.add(
         AuditLog(
             user_id=user.id,
             project_id=p.id,
             action="video.sample",
             target=f"video:{v.id}",
-            detail={"frames": made, **body.model_dump()},
+            detail={"frames": len(todo), **body.model_dump()},
         )
     )
     db.commit()
-    return {"video_id": v.id, "frames": made, "already": existing}
+    run = _start_sampling(db, p, v, path, todo, user, "automático") if todo else None
+    return {"video_id": v.id, "run_id": run.id if run else None, "frames": len(todo), "already": len(idxs) - len(todo)}

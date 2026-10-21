@@ -83,7 +83,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface ImportImagesResult { images: number; with_labels: number; boxes: number; skipped: string[]; warnings: string[]; batch: string }
-export interface ImportVideoResult { video_id: number; name: string; frames: number; duration: number; fps: number; first_frame_id: number | null; mode: "auto" | "manual" }
+export interface ImportVideoResult { video_id: number; name: string; frames: number; duration: number; fps: number; first_frame_id: number | null; mode: "auto" | "manual"; run_id: number | null; planned: number }
 export interface SamplePlan { mode: "auto" | "manual"; interval: number; start: number; end: number | null }
 
 /** Subida con progreso (fetch no lo informa). */
@@ -178,7 +178,7 @@ export const api = {
     fd.append("reviewed", String(reviewed));
     return upload<ImportImagesResult>(`/api/projects/${pid}/import/images`, fd, onProgress);
   },
-  sampleVideo: (vid: number, body: { interval: number; start: number; end: number | null }) => req<{ video_id: number; frames: number; already: number }>(`/api/videos/${vid}/sample`, { method: "POST", body: JSON.stringify(body) }),
+  sampleVideo: (vid: number, body: { interval: number; start: number; end: number | null }) => req<{ video_id: number; run_id: number | null; frames: number; already: number }>(`/api/videos/${vid}/sample`, { method: "POST", body: JSON.stringify(body) }),
   importVideo: (pid: number, file: File, plan: SamplePlan, onProgress: (f: number) => void) => {
     const fd = new FormData();
     fd.append("file", file);
